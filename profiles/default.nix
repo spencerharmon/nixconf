@@ -13,5 +13,5 @@
         experimental-features = nix-command flakes
         '';
   };
-#  nix.requireSignedBinaryCaches = false;  
+  nix.requireSignedBinaryCaches = false;  
 }
