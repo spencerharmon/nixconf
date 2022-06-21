@@ -31,6 +31,7 @@
           user = "root";
           path = deploy-rs.lib.x86_64-linux.activate.nixos self.nixosConfigurations.chrome1;
         };
+      };
       nodes.chrome2 = {
         hostname = "chrome2.lan";
         profiles.system = {
