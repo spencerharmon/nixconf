@@ -14,6 +14,14 @@
           ./users.nix
         ];
       };
+      chrome2 = nixpkgs.lib.nixosSystem {
+        system = "x86_64-linux";
+        modules = [
+          ./systems/chrome2/configuration.nix
+          ./profiles/default.nix
+          ./users.nix
+        ];
+      };
     };
     deploy = {
       nodes.chrome1 = {
@@ -23,6 +31,14 @@
           user = "root";
           path = deploy-rs.lib.x86_64-linux.activate.nixos self.nixosConfigurations.chrome1;
         };
+      nodes.chrome2 = {
+        hostname = "chrome2.lan";
+        profiles.system = {
+          sshUser = "spencer";
+          user = "root";
+          path = deploy-rs.lib.x86_64-linux.activate.nixos self.nixosConfigurations.chrome1;
+        };
+        
       };
     };
     checks = builtins.mapAttrs (system: deployLib: deployLib.deployChecks self.deploy) deploy-rs.lib;
