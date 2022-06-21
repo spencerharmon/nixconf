@@ -36,7 +36,7 @@
         profiles.system = {
           sshUser = "spencer";
           user = "root";
-          path = deploy-rs.lib.x86_64-linux.activate.nixos self.nixosConfigurations.chrome1;
+          path = deploy-rs.lib.x86_64-linux.activate.nixos self.nixosConfigurations.chrome2;
         };
         
       };
