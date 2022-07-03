@@ -1,11 +1,10 @@
 { pkgs, ... }: {
   imports = [
-    ./common.nix
+    ../common.nix
   ];
   environment = {
     systemPackages = with pkgs; [
-      kubeadm
-      containerd
+      kubectl
     ];
   };
 }

@@ -1,7 +1,7 @@
 {
   description = "deploy nixos systems";
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-22.05";
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     deploy-rs.url = "github:serokell/deploy-rs";
   };
   outputs = { self, nixpkgs, deploy-rs }: {
@@ -10,7 +10,8 @@
         system = "x86_64-linux";
         modules = [
           ./systems/chrome1/configuration.nix
-          ./profiles/default.nix
+          ./profiles/kubernetes/controller-worker.nix
+          ./clusters/chrome-kube.nix
           ./users.nix
         ];
       };
@@ -18,7 +19,8 @@
         system = "x86_64-linux";
         modules = [
           ./systems/chrome2/configuration.nix
-          ./profiles/default.nix
+          ./profiles/kubernetes/worker.nix
+          ./clusters/chrome-kube.nix
           ./users.nix
         ];
       };
@@ -26,7 +28,8 @@
         system = "x86_64-linux";
         modules = [
           ./systems/chrome3/configuration.nix
-          ./profiles/default.nix
+          ./profiles/kubernetes/worker.nix
+          ./clusters/chrome-kube.nix
           ./users.nix
         ];
       };
