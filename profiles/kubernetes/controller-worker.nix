@@ -1,5 +1,14 @@
 { config, ... }: {
-  networking.firewall.allowedTCPPorts = [ 8888 9488 ];
+  networking.firewall.allowedTCPPorts = [
+    8888
+    9488
+    6443
+    2379
+    2380
+    10250
+    10259
+    10257
+  ];
   imports = [
     ./kubernetes-common.nix
   ];
