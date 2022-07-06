@@ -4,7 +4,7 @@
   ];
   
   networking.firewall.allowedTCPPortRanges = [
-    {from = 30000; to = 32767}
+    {from = 30000; to = 32767;}
   ];
 
   imports = [
