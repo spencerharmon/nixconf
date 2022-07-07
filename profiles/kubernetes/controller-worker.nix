@@ -15,4 +15,5 @@
   services.kubernetes = {
     roles = [ "master" "node" ];
   };
+  services.kubernetes.apiserver.allowPrivileged = true;
 }
