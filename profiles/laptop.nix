@@ -2,17 +2,29 @@
   sound.enable = true;
   hardware.pulseaudio.enable = true;
 
-  services.xserver.enable = true;
-  services.xserver.windowManager.session = lib.singleton {
-    name = "exwm";
-    start = ''
-      xhost +SI:localuser:$USER
-      exec emacs
-    '';
+  services = {
+    xserver = {
+      enable = true;
+      windowManager.session = lib.singleton {
+        name = "exwm";
+        start = ''
+          xhost +SI:localuser:$USER
+          exec emacs
+        '';
+      };
+      displayManager = {
+        defaultSession = "none+exwm";
+        lightdm = {
+          enable  = true;
+          greeter.enable = false;
+          autoLogin = {
+            enable = true;
+            user = "spencer";
+          };
+        };
+      };
+    };
   };
-  services.xserver.displayManager.lightdm.enable  = true;
-  services.xserver.displayManager.lightdm.greeters.tiny.enable = true;
-  services.xserver.displayManager.defaultSession = "none+exwm";
   environment = {
     systemPackages = with pkgs; [
       firefox-bin
