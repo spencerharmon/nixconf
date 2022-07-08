@@ -33,6 +33,14 @@
           ./users.nix
         ];
       };
+      yoga = nixpkgs.lib.nixosSystem {
+        system = "x86_64-linux";
+        modules = [
+          ./systems/yoga/configuration.nix
+          ./profiles/laptop.nix
+          ./users.nix
+        ];
+      };
     };
     deploy = {
       nodes.chrome1 = {
