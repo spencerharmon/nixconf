@@ -3,7 +3,6 @@
   hardware.pulseaudio.enable = true;
 
   services.xserver.enable = true;
-  services.xserver.windowManager.exwm.enable = true;
   services.xserver.windowManager.session = lib.singleton {
     name = "exwm";
     start = ''
