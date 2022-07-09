@@ -1,4 +1,4 @@
-{ pkgs, lib, ... }: {
+{ config, pkgs, lib, ... }: {
   imports = [
     ./common.nix
   ];
@@ -7,6 +7,7 @@
 
   hardware.trackpoint.enable = lib.mkDefault true;
   hardware.trackpoint.emulateWheel = lib.mkDefault config.hardware.trackpoint.enable;
+  
   services = {
     xserver = {
       enable = true;
