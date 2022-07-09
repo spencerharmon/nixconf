@@ -34,6 +34,7 @@
   };
   environment = {
     systemPackages = with pkgs; [
+      python3
       firefox-bin
       emacs
       pkgs.xorg.xhost
