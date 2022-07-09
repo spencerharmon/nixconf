@@ -1,4 +1,7 @@
 { pkgs, lib, ... }: {
+  imports = [
+    ./common.nix
+  ];
   sound.enable = true;
   hardware.pulseaudio.enable = true;
 
