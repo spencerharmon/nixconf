@@ -5,6 +5,8 @@
   sound.enable = true;
   hardware.pulseaudio.enable = true;
 
+  hardware.trackpoint.enable = lib.mkDefault true;
+  hardware.trackpoint.emulateWheel = lib.mkDefault config.hardware.trackpoint.enable;
   services = {
     xserver = {
       enable = true;
@@ -12,7 +14,7 @@
         name = "exwm";
         start = ''
           xhost +SI:localuser:$USER
-          exec emacs
+          exec emacs --fullscreen
         '';
       };
       displayManager = {
