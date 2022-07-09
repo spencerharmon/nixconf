@@ -34,6 +34,7 @@
   };
   environment = {
     systemPackages = with pkgs; [
+      unzip
       python3
       firefox-bin
       emacs
