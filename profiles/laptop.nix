@@ -5,7 +5,7 @@
   sound.enable = true;
   hardware.pulseaudio.enable = true;
 
-  boot.kernelParams = [ "psmouse.elantech_smbus=0" ]
+  boot.kernelParams = [ "psmouse.elantech_smbus=0" ];
   hardware.trackpoint.enable = lib.mkDefault true;
   hardware.trackpoint.emulateWheel = lib.mkDefault config.hardware.trackpoint.enable;
   
