@@ -5,7 +5,9 @@
   environment = {
     systemPackages = with pkgs; [
       kubectl
-      kubeadm
+      cni
+      cni-plugins
+      cni-plugin-flannel
     ];
   };
 }
