@@ -7,4 +7,5 @@
       kubectl
     ];
   };
+  services.flannel.backend.Type = "host-gw";
 }
