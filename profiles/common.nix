@@ -8,11 +8,14 @@
       git
     ];
   };
-  nix = {
-    package = pkgs.nixFlakes;
-    extraOptions = ''
-        experimental-features = nix-command flakes
-        '';
+  nix.settings.experimental-features = [ "nix-command" "flakes" ];
+  nix.settings.require-sigs = false;
+  nix.settings.auto-optimise-store = true;
+  nix.settings.min-free = 1024 * 1024 * 1024;       # 1 GiB
+  nix.settings.max-free = 5 * 1024 * 1024 * 1024;   # 5 GiB
+  nix.gc = {
+    automatic = true;
+    dates = "weekly";
+    options = "--delete-older-than 14d";
   };
-  nix.requireSignedBinaryCaches = false;  
 }

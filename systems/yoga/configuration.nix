@@ -27,6 +27,16 @@
 
   networking.interfaces.wlp2s0.useDHCP = true;
 
+  networking.enableIPv6 = false;
+
+  networking.firewall.allowedTCPPorts = [ 22 ];
+
+  networking.dhcpcd.extraConfig = ''
+    noarp
+    release no
+  '';
+  systemd.services.dhcpcd.serviceConfig.TimeoutStopSec = "5s";
+
   # Configure network proxy if necessary
   # networking.proxy.default = "http://user:password@proxy:port/";
   # networking.proxy.noProxy = "127.0.0.1,localhost,internal.domain";

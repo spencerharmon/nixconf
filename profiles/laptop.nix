@@ -2,8 +2,12 @@
   imports = [
     ./common.nix
   ];
-  sound.enable = true;
-  hardware.pulseaudio.enable = true;
+  services.pulseaudio.enable = false;
+  services.pipewire = {
+    enable = true;
+    pulse.enable = true;
+    alsa.enable = true;
+  };
 
   boot.kernelParams = [ "psmouse.elantech_smbus=0" ];
   hardware.trackpoint.enable = lib.mkDefault true;
