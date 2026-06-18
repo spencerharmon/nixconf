@@ -1,62 +1,20 @@
 ;; ===================================
-;; ELPA Hack
+;; PATH / exec-path
 ;; ===================================
-;; Enables basic packaging support
-
-;; Hack for using a different set of repositories when ELPA is down
-(setq package-archives
-      '(("melpa" . "https://raw.githubusercontent.com/d12frosted/elpa-mirror/master/melpa/")
-        ("org"   . "https://raw.githubusercontent.com/d12frosted/elpa-mirror/master/org/")
-        ("gnu"   . "https://raw.githubusercontent.com/d12frosted/elpa-mirror/master/gnu/")))
-;; (setq package-check-signature nil) ;; probably not necessary
-(package-initialize)
+;; ~/.local/bin holds user-managed wrappers (e.g. caveman). Prepend
+;; early so anything in init that calls `executable-find' can find them.
+(let ((local-bin (expand-file-name "~/.local/bin")))
+  (when (file-directory-p local-bin)
+    (setenv "PATH" (concat local-bin ":" (getenv "PATH")))
+    (add-to-list 'exec-path local-bin)))
 
 ;; ===================================
-;; MELPA Package Support
+;; Package system
 ;; ===================================
-;; Enables basic packaging support
+;; All packages provided by nix via home-manager (programs.emacs.extraPackages).
+;; No ELPA/MELPA bootstrap — emacs is the WM on yoga; offline-deterministic.
 (require 'package)
-
-
-(add-to-list 'package-archives
-             '("melpa-stable" . "https://stable.melpa.org/packages/"))
-(add-to-list 'package-archives
-             '("gnu" . "https://elpa.gnu.org/packages/"))
-(add-to-list 'package-archives
-             '("melpa" . "http://melpa.org/packages/"))
-
-
 (package-initialize)
-
-;; If there are no archived package contents, refresh them
-(when (not package-archive-contents)
-  (package-refresh-contents))
-
-
-;; list package names
-(defvar myPackages
-  '(better-defaults                 ;; Set up some better Emacs defaults
-    elpy                            ;; Emacs Lisp Python Environment
-    flycheck
-    py-autopep8
-    material-theme
-    flyspell-correct-ivy
-    per-buffer-theme
-    yaml-mode
-    yaml-tomato
-    )
-  )
-
-;; Scans the list in myPackages
-;; If the package listed is not already installed, install it
-;; Tolerate failures (missing from archives, no network, etc.) so that
-;; emacs still comes up — important because EXWM is emacs.
-(mapc (lambda (package)
-        (condition-case err
-            (unless (package-installed-p package)
-              (package-install package))
-          (error (message "Failed to install %s: %s" package err))))
-      myPackages)
 
 ;; =============
 ;; Sound
@@ -67,9 +25,17 @@
 ;; Aesthetic
 ;; ====================================
 
-;; disable toolbar
+;; disable chrome (toolbar, menu bar, scroll bars, tooltips)
+;; guarded for tty / -nw startup where these may be nil
+(when (fboundp 'tool-bar-mode)   (tool-bar-mode -1))
+(when (fboundp 'menu-bar-mode)   (menu-bar-mode -1))
+(when (fboundp 'scroll-bar-mode) (scroll-bar-mode -1))
+(when (fboundp 'tooltip-mode)    (tooltip-mode -1))
+
 ;; enable custom theme
-(load-theme 'spencer t)
+(add-to-list 'custom-theme-load-path
+             (expand-file-name "~/.emacs.d/"))
+(load-theme 'soft-paper t)
 
 ;; emoji support (depends on fonts-noto)
 (set-fontset-font "fontset-default" 'symbol "Noto Color Emoji")
@@ -83,18 +49,28 @@
 ;; one dedicated to term. This will keep the theme from
 ;; changing back-and-forth.
 ;; Then, run tmux on bastion host.
-(require 'per-buffer-theme nil 'noerror)
-;; NOTE: variable names changed in newer per-buffer-theme.el
-;; use hyphenated variable names (not slashes) and proper alist format.
-(setq per-buffer-theme-use-timer t)
-(setq per-buffer-theme-timer-idle-delay 0.1)
-(setq per-buffer-theme-default-theme 'spencer)
-(setq per-buffer-theme-themes-alist
-      '(((:theme . spencer-dark)
-         (:font . nil)
-         (:buffernames . ("*terminal*"))
-         (:modes . (term-mode)))))
-(per-buffer-theme-mode)
+(when (require 'per-buffer-theme nil 'noerror)
+  ;; NOTE: variable names changed in newer per-buffer-theme.el
+  ;; use hyphenated variable names (not slashes) and proper alist format.
+  (setq per-buffer-theme-use-timer t)
+  (setq per-buffer-theme-timer-idle-delay 0.1)
+  (setq per-buffer-theme-default-theme 'soft-paper)
+  (setq per-buffer-theme-themes-alist
+        '(((:theme . spencer-dark)
+           (:font . nil)
+           (:buffernames . ("*terminal*"))
+           (:modes . (term-mode)))))
+  (per-buffer-theme-mode))
+
+(defun spencer-open-startup-shell ()
+  "Start in a shell buffer occupying the whole frame."
+  (condition-case err
+      (progn
+        (let ((buf (shell "*shell*")))
+          (switch-to-buffer buf)
+          (delete-other-windows)))
+    (error (message "startup shell skipped: %s" err))))
+(add-hook 'emacs-startup-hook #'spencer-open-startup-shell)
 
 ;; yank in term (kill-ing)
 (defun term-yank-kill-ring ()
@@ -221,17 +197,19 @@
 (setq elpy-rpc-python-command "python3")
 
 ;; ===================================
-;; agent-shell
+;; cavemacs
 ;; ===================================
-
-(use-package agent-shell
-    :ensure t
-    :ensure-system-package
-    ())
-
-;; qwen code
-  (setq agent-shell-qwen-authentication
-        (agent-shell-qwen-make-authentication :none t))
+;; Wrap in condition-case: if caveman binary isn't built yet
+;; (~/git-repos/caveman-code requires manual npm install/build),
+;; cavemacs signals an error on load. Don't let that abort the
+;; rest of init — EXWM lives further down and must come up.
+(condition-case err
+    (progn
+      (setq cavemacs-default-model "github-copilot/claude-opus-4.7-1m-internal")
+      (let ((bin (executable-find "caveman")))
+        (when bin (setq cavemacs-binary bin)))
+      (require 'cavemacs nil 'noerror))
+  (error (message "cavemacs setup skipped: %s" err)))
 
 ;; ===================================
 ;; magit
@@ -293,8 +271,7 @@
      ("\\.mm\\'" . default)
      ("\\.x?html?\\'" . "/mnt/c/Program\\ Files/Google/Chrome/Application/chrome.exe")
      ("\\.pdf\\'" . default)))
- '(package-selected-packages
-   '(outline-indent groovy-mode erc-image circe hidepw per-buffer-theme go-mode terraform-mode flycheck-yamllint poly-ansible flyspell-correct-ivy magit use-package py-autopep8 material-theme flycheck elpy edit-server better-defaults yaml-mode nix-mode)))
+ '(package-selected-packages nil))
 (custom-set-faces
  ;; custom-set-faces was added by Custom.
  ;; If you edit it by hand, you could mess it up, so be careful.
@@ -323,20 +300,111 @@
 (when (string= (system-name) "yoga")
   (condition-case err
       (progn
+        ;; Battery in modeline. sysfs backend works on yoga's eMMC/SD
+        ;; layout where /sys/class/power_supply/BAT0 is the canonical
+        ;; source.
+        (setq battery-status-function #'battery-linux-sysfs)
+        (display-battery-mode 1)
         (require 'exwm)
-        (require 'exwm-config)
         (require 'exwm-systemtray)
-        (exwm-systemtray-enable)
-        (exwm-config-default)
-        (exwm-enable)
+        (exwm-systemtray-mode 1)
+        (exwm-wm-mode 1)
         (require 'exwm-firefox-core nil 'noerror)
         (setq exwm-systemtray-height 100)
+        ;; Global keys. The variable expects an alist; previously two
+        ;; separate setq calls overwrote each other and only the last
+        ;; binding took effect.
         (setq exwm-input-global-keys
-              `(,(kbd "s-&") .
-                (lambda (command)
-                  (interactive (list (read-shell-command "$ ")))
-                  (start-process-shell-command command nil command))))
-        (setq exwm-input-global-keys
-              `(,(kbd "s-f") . (start-process-shell-command "firefox" nil "firefox")))
+              `((,(kbd "s-&") .
+                 (lambda (command)
+                   (interactive (list (read-shell-command "$ ")))
+                   (start-process-shell-command command nil command)))
+                (,(kbd "s-f") .
+                 (lambda ()
+                   (interactive)
+                   (start-process-shell-command "firefox" nil "firefox")))
+                (,(kbd "s-l") .
+                 (lambda ()
+                   (interactive)
+                   (start-process-shell-command "slock" nil "slock")))))
         (when (fboundp 'auto-sudoedit-mode) (auto-sudoedit-mode 1)))
     (error (message "EXWM setup failed: %s" err))))
+
+;; =====
+;; Wifi picker (wpa_supplicant backend). M-x wifi.
+;; Declarative networks come from profiles/wifi-yoga.nix.
+;; Ad-hoc networks are added via wpa_cli + save_config and persist
+;; to the imperative wpa_supplicant config (gated by
+;; networking.wireless.allowAuxiliaryImperativeNetworks = true in
+;; profiles/wifi-yoga.nix; the spencer user must be in the
+;; wpa_supplicant group, set in users.nix).
+;; =====
+(defvar wifi-iface "wlp2s0")
+
+(defun wifi--wpa (&rest args)
+  (with-output-to-string
+    (with-current-buffer standard-output
+      (apply #'call-process "wpa_cli" nil t nil "-i" wifi-iface args))))
+
+(defun wifi--known-networks ()
+  "List configured networks as ((id . ssid) ...)."
+  (let ((out (wifi--wpa "list_networks"))
+        result)
+    (dolist (line (cdr (split-string out "\n" t)))
+      (when (string-match "^\\([0-9]+\\)\t\\([^\t]*\\)" line)
+        (push (cons (match-string 1 line) (match-string 2 line)) result)))
+    (nreverse result)))
+
+(defun wifi--scan-results ()
+  "Return list of visible SSIDs (deduped, non-empty)."
+  (wifi--wpa "scan")
+  (sleep-for 2)
+  (let ((out (wifi--wpa "scan_results"))
+        ssids)
+    (dolist (line (cdr (split-string out "\n" t)))
+      ;; bssid / freq / sigl / flags / ssid (tab-separated)
+      (let ((cols (split-string line "\t")))
+        (when (>= (length cols) 5)
+          (let ((ssid (nth 4 cols)))
+            (unless (or (string-empty-p ssid) (member ssid ssids))
+              (push ssid ssids))))))
+    (nreverse ssids)))
+
+(defun wifi--add-network (ssid psk)
+  "Add SSID with PSK to wpa_supplicant and persist via save_config.
+Returns the new network id as string, or signals on failure."
+  (let* ((id (string-trim (wifi--wpa "add_network"))))
+    (unless (string-match-p "^[0-9]+$" id)
+      (user-error "add_network failed: %s" id))
+    ;; wpa_cli quoting: ssid/psk values must be wrapped in literal
+    ;; double-quotes inside the argument.
+    (wifi--wpa "set_network" id "ssid" (format "\"%s\"" ssid))
+    (if (string-empty-p psk)
+        (wifi--wpa "set_network" id "key_mgmt" "NONE")
+      (wifi--wpa "set_network" id "psk" (format "\"%s\"" psk)))
+    (wifi--wpa "enable_network" id)
+    (let ((saved (string-trim (wifi--wpa "save_config"))))
+      (unless (string-match-p "OK" saved)
+        (message "wifi: save_config returned %s (network is active but not persisted)" saved)))
+    id))
+
+(defun wifi ()
+  "Pick a wifi network. Known networks select immediately;
+unknown visible networks prompt for PSK, add, and persist."
+  (interactive)
+  (let* ((known (wifi--known-networks))
+         (known-ssids (mapcar #'cdr known))
+         (visible (wifi--scan-results))
+         (all (delete-dups (append known-ssids visible)))
+         (_ (unless all (user-error "No networks found")))
+         (ssid (completing-read "Network: " all nil nil))
+         (entry (rassoc ssid known)))
+    (cond
+     (entry
+      (wifi--wpa "select_network" (car entry))
+      (message "wifi: selected known network %s (id %s)" ssid (car entry)))
+     (t
+      (let* ((psk (read-passwd (format "Password for %s (empty for open): " ssid)))
+             (id (wifi--add-network ssid psk)))
+        (wifi--wpa "select_network" id)
+        (message "wifi: added and selected %s (id %s)" ssid id))))))

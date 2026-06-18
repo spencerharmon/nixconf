@@ -1,24 +1,26 @@
 # AGENTS.md
 
-NixOS flake managing 4 hosts. `chrome*` deploy via `deploy-rs`; `yoga` applies locally.
+NixOS flake managing chrome hosts plus Yoga's two-part layout: `underyoga` on internal eMMC and `yoga-sd-0` on encrypted SD. `chrome*` deploy via `deploy-rs`; Yoga applies locally with `nixos-rebuild`.
 
 ## Layout
 
 - `flake.nix` — `nixosConfigurations` + `deploy.nodes`. `inputs` is passed to modules via `specialArgs = { inherit inputs; }` (required for `home-manager.nixosModules.home-manager`).
-- `systems/<host>/` — per-host hardware/network/hostname only.
+- `systems/<host>/` — per-host hardware/network/identity. `systems/yoga/` is shared Yoga hardware/base config, not a standalone flake target.
 - `profiles/` — reusable role modules. Notable:
   - `common.nix` — openssh, flakes, timezone, allowUnfree, **GC policy** (`nix.gc.automatic`, `min-free`/`max-free`, `auto-optimise-store`).
   - `laptop.nix` — X + lightdm autologin → EXWM, pipewire, firefox, emacs GUI.
   - `wifi-yoga.nix` — yoga wifi via wpa_supplicant + agenix.
   - `spencer-home.nix` — wires home-manager into the system; consumes `home/spencer.nix`.
   - `coding-agents.nix` — `claude-code` (note CPU constraints below).
-  - `yoga-minimal.nix` — stripped profile used **only for nixpkgs version-jump hops** on yoga's tiny root partition (see "Yoga upgrade dance").
+  - `underyoga.nix` — minimal encrypted eMMC recovery/dispatcher system.
+  - `yoga-sd.nix` — encrypted SD-root Yoga workstation profile.
+  - `zram.nix` + `spencer-password.nix` — shared Yoga-family zram + declarative password hash.
 - `clusters/chrome-kube.nix` — shared k8s cluster settings.
 - `home/spencer.nix` + `home/spencer/<file>` — home-manager config + flat files (`.emacs` etc.).
 - `secrets/secrets.nix` + `secrets/*.age` — agenix. Recipients: `spencer` (admin user) + per-host SSH host keys.
 - `users.nix` — `spencer` user + authorized SSH ed25519 key. Applied to every host.
 
-Hosts: `chrome1` (k8s master+node), `chrome2`/`chrome3` (k8s workers, `chromeN.lan`), `yoga` (laptop).
+Hosts: `chrome1` (k8s master+node), `chrome2`/`chrome3` (k8s workers, `chromeN.lan`), `underyoga` (minimal eMMC recovery/dispatcher on Yoga), `yoga-sd-0` (primary encrypted-SD Yoga workstation, hostname `yoga`).
 
 ## Module wiring quirks
 
@@ -38,9 +40,14 @@ Deploy chrome*:
 nix run github:serokell/deploy-rs -- .#<host>
 ```
 
-Yoga (no deploy-rs entry, apply locally on yoga):
+Yoga workstation (booted from encrypted SD, hostname `yoga`):
 ```
-sudo nixos-rebuild switch --flake .#yoga
+sudo nixos-rebuild switch --flake .#yoga-sd-0
+```
+
+Underyoga recovery/dispatcher (booted from internal eMMC):
+```
+sudo nixos-rebuild switch --flake .#underyoga
 ```
 
 Edit a secret (run on a host with `~/.ssh/id_ed25519` that's a registered recipient):
@@ -58,20 +65,15 @@ cd secrets && nix run github:ryantm/agenix -- -e <name>.age
 
 ## Yoga gotchas
 
-- **15 GB root partition (`/dev/mmcblk1p1`)**. A full desktop closure (~6.5 GB) does not fit alongside a running generation. Major nixpkgs version jumps require a "shrink hop":
-  1. Use `profiles/yoga-minimal.nix` to build a closure with no desktop (~3 GB).
-  2. `nixos-rebuild boot` minimal, reboot.
-  3. `sudo nix-collect-garbage -d` frees ~8 GB (drops the old gen's closure).
-  4. Rebuild full config — now fits.
-- `nix.gc.automatic` + `min-free`/`max-free` in `common.nix` make day-to-day updates self-managing, but a major rebase (e.g. annual release jump) still needs the shrink hop.
-- **External USB as scratch store** for big builds:
-  ```
-  sudo mount /dev/sdX1 /mnt/build
-  cd ~/git-repos/nixconf && nix --store /mnt/build build .#nixosConfigurations.yoga.config.system.build.toplevel
-  ```
-  Then `nixos-rebuild boot` with `--option extra-substituters "local?root=/mnt/build"`. **The final installed system must have zero references to the USB device** — confirm with `nix-store --query --requisites $(readlink /run/current-system) | grep /mnt/build` (should be empty) before unplugging.
+For full hardware notes, known issues, and planned improvements, see [`docs/yoga.md`](docs/yoga.md). Highlights:
+
+- **Current Yoga storage state**: internal eMMC (`/dev/mmcblk1`) runs encrypted `underyoga` recovery/dispatcher; internal SD slot (`/dev/mmcblk0` when booted on Yoga) runs encrypted `yoga-sd-0` workstation.
+- `underyoga` GRUB default entry searches for `yoga-sd-boot` and `configfile`s into the SD's own GRUB config. If no SD is present, choose the `underyoga` menu entry manually.
+- `yoga-sd-0` uses `boot.loader.grub.device = "nodev"`; normal `nixos-rebuild switch --flake .#yoga-sd-0` updates `/boot/grub/grub.cfg` and kernels but does **not** reinstall MBR. Install scripts run `grub-install --boot-directory=/mnt/boot /dev/<current-device>` once at provisioning time.
+- SD wear mitigations on Yoga SD roots: zram swap, no disk swap, `/tmp` tmpfs, `/` ext4 `noatime,commit=60`, `/boot` `noatime`, weekly fstrim, journald capped at 100M.
+- If Yoga SD shows `mmcblk0` I/O errors or root remounts `emergency_ro`, boot `underyoga` and run fsck on `/dev/mmcblk0p1` and `/dev/mapper/yoga-sd-root` before booting the SD again.
 - **CPU is Intel Celeron N3150 (Braswell, no AVX2)**. Bun-based tools (`pkgs.opencode`, `pkgs.bun`) SIGILL on first JIT. Use `pkgs.claude-code` (embedded Node SEA) or `pkgs.codex` (Rust binary) instead. Documented in `profiles/coding-agents.nix`.
-- IPv6 broken on the local network — `networking.enableIPv6 = false` in `systems/yoga/configuration.nix`.
+- IPv6 broken on the local network — `networking.enableIPv6 = false` in `systems/yoga/configuration.nix` (shared by both Yoga targets).
 
 ## Bootstrap from a stuck Nix
 

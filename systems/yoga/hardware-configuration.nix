@@ -8,17 +8,37 @@
     [ (modulesPath + "/installer/scan/not-detected.nix")
     ];
 
-  boot.initrd.availableKernelModules = [ "xhci_pci" "usb_storage" "sd_mod" "sdhci_acpi" ];
+  # Strip initrd to just modules needed to mount root on yoga's hardware:
+  # eMMC via sdhci_acpi+mmc_block, ext4, USB fallback boot from sda,
+  # internal keyboard. Skips ~40 modules NixOS includes by default.
+  # See docs/yoga.md for boot timing rationale.
+  boot.initrd.includeDefaultModules = false;
+  boot.initrd.availableKernelModules = [
+    "sdhci_acpi" "mmc_block"
+    "ext4"
+    "xhci_pci" "usb_storage" "uas" "sd_mod"
+    "i8042" "atkbd" "hid_generic"
+  ];
   boot.initrd.kernelModules = [ ];
   boot.kernelModules = [ "kvm-intel" ];
   boot.extraModulePackages = [ ];
 
   fileSystems."/" =
-    { device = "/dev/disk/by-uuid/91fbf92f-f0a3-4f1f-9697-0a337ec19937";
-      fsType = "xfs";
+    { device = "/dev/disk/by-label/nixos";
+      fsType = "ext4";
     };
 
-  swapDevices = [ ];
+  swapDevices = [
+    { device = "/var/swapfile"; size = 4096; }
+  ];
 
-  hardware.cpu.intel.updateMicrocode = lib.mkDefault config.hardware.enableRedistributableFirmware;
+  # Drop the ~15M Intel microcode bundle prepended to initrd. Braswell
+  # N3150 microcode is rarely updated and not security-critical for this
+  # laptop's use; trading it for ~15M smaller initrd halves the eMMC
+  # read time during boot.
+  hardware.cpu.intel.updateMicrocode = lib.mkForce false;
+
+  # systemd-based initrd: parallel module load + mount, faster than the
+  # scripted initrd on slow eMMC.
+  boot.initrd.systemd.enable = true;
 }

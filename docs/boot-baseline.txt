@@ -1,0 +1,119 @@
+22.414s dhcpcd.service
+15.031s sys-devices-pnp0-00:07-tpm-tpm0.device
+15.030s dev-tpm0.device
+14.346s dev-ttyS2.device
+14.346s sys-devices-platform-serial8250-serial8250:0-serial8250:0.2-tty-ttyS2.device
+14.319s sys-devices-platform-serial8250-serial8250:0-serial8250:0.3-tty-ttyS3.device
+14.319s dev-ttyS3.device
+14.318s sys-devices-platform-serial8250-serial8250:0-serial8250:0.1-tty-ttyS1.device
+14.318s dev-ttyS1.device
+14.314s dev-ttyS0.device
+14.313s sys-devices-platform-serial8250-serial8250:0-serial8250:0.0-tty-ttyS0.device
+14.153s dev-mmcblk1p1.device
+14.153s dev-disk-by\x2did-mmc\x2dSDW16G_0xc5704e3c\x2dpart1.device
+14.153s dev-disk-by\x2dpath-platform\x2d80860F14:00\x2dpart-by\x2dpartuuid-9a8baae8\x2d01.device
+14.153s dev-disk-by\x2dpath-platform\x2d80860F14:00\x2dpart1.device
+14.152s dev-disk-by\x2dpath-platform\x2d80860F14:00\x2dpart-by\x2duuid-91fbf92f\x2df0a3\x2d4f1f\x2d9697\x2d0a337ec19937.device
+14.150s sys-devices-platform-80860F14:00-mmc_host-mmc1-mmc1:0001-block-mmcblk1-mmcblk1p1.device
+14.149s dev-disk-by\x2ddiskseq-1\x2dpart1.device
+14.149s dev-disk-by\x2dpath-platform\x2d80860F14:00\x2dpart-by\x2dlabel-NIXROOT.device
+14.148s dev-disk-by\x2dpartuuid-9a8baae8\x2d01.device
+14.147s dev-disk-by\x2dlabel-NIXROOT.device
+14.146s dev-disk-by\x2dpath-platform\x2d80860F14:00\x2dpart-by\x2dpartnum-1.device
+14.146s dev-disk-by\x2duuid-91fbf92f\x2df0a3\x2d4f1f\x2d9697\x2d0a337ec19937.device
+13.888s dev-mmcblk1.device
+13.888s dev-disk-by\x2did-mmc\x2dSDW16G_0xc5704e3c.device
+13.888s dev-disk-by\x2dpath-platform\x2d80860F14:00.device
+13.887s dev-disk-by\x2ddiskseq-1.device
+13.887s sys-devices-platform-80860F14:00-mmc_host-mmc1-mmc1:0001-block-mmcblk1.device
+13.887s dev-mmcblk1boot1.device
+13.887s sys-devices-platform-80860F14:00-mmc_host-mmc1-mmc1:0001-block-mmcblk1-mmcblk1boot1.device
+13.887s dev-disk-by\x2ddiskseq-3.device
+13.887s dev-disk-by\x2dpath-platform\x2d80860F14:00\x2dboot1.device
+13.880s dev-disk-by\x2dpath-platform\x2d80860F14:00\x2dboot0.device
+13.880s dev-disk-by\x2ddiskseq-2.device
+13.880s dev-mmcblk1boot0.device
+13.880s sys-devices-platform-80860F14:00-mmc_host-mmc1-mmc1:0001-block-mmcblk1-mmcblk1boot0.device
+ 3.816s initrd-switch-root.service
+ 2.641s home-manager-spencer.service
+ 1.277s network-addresses-wlp2s0.service
+ 1.242s accounts-daemon.service
+  972ms systemd-udev-trigger.service
+  941ms firewall.service
+  889ms user@1000.service
+  746ms systemd-journal-flush.service
+  706ms systemd-timesyncd.service
+  687ms resolvconf.service
+  657ms systemd-udevd.service
+  653ms polkit.service
+  574ms trackpoint.service
+  534ms suid-sgid-wrappers.service
+  480ms systemd-modules-load.service
+  477ms display-manager.service
+  406ms network-local-commands.service
+  323ms systemd-journald.service
+  304ms dbus-broker.service
+  282ms sys-kernel-config.mount
+  267ms systemd-tmpfiles-setup-dev-early.service
+  213ms systemd-logind.service
+  211ms systemd-oomd.service
+  177ms systemd-journalctl.socket
+  175ms systemd-remount-fs.service
+  168ms logrotate.service
+  147ms systemd-random-seed.service
+  146ms dev-hugepages.mount
+  144ms dev-mqueue.mount
+  140ms sys-kernel-debug.mount
+  137ms sys-kernel-tracing.mount
+  135ms systemd-sysctl.service
+  132ms kmod-static-nodes.service
+  130ms systemd-tmpfiles-setup.service
+  128ms sshd.service
+  127ms modprobe@configfs.service
+  125ms modprobe@fuse.service
+  122ms sys-fs-fuse-connections.mount
+  121ms systemd-tmpfiles-setup-dev.service
+  117ms user-runtime-dir@1000.service
+  116ms linger-users.service
+  111ms post-boot.service
+  107ms systemd-fsck-root.service
+  101ms systemd-user-sessions.service
+   97ms systemd-backlight@backlight:intel_backlight.service
+   96ms systemd-rfkill.service
+   95ms systemd-vconsole-setup.service
+   86ms logrotate-checkconf.service
+   83ms systemd-bootctl.socket
+   77ms nscd.service
+   60ms systemd-update-utmp.service
+   38ms run-wrappers.mount
+   13ms polkit-agent-helper.socket
+    7ms systemd-coredump.socket
+    6ms systemd-creds.socket
+    4ms sshd-unix-local.socket
+  591us systemd-journald-dev-log.socket
+  521us systemd-journald.socket
+  503us dbus.socket
+  303us nix-daemon.socket
+  275us systemd-oomd.socket
+  268us systemd-rfkill.socket
+  255us systemd-hostnamed.socket
+  196us systemd-udevd-kernel.socket
+  190us systemd-udevd-control.socket
+  146us systemd-journald-audit.socket
+Startup finished in 1.606s (kernel) + 11.293s (initrd) + 27.543s (userspace) = 40.443s 
+graphical.target reached after 27.542s in userspace.
+The time when unit became active or started is printed after the "@" character.
+The time the unit took to start is printed after the "+" character.
+
+graphical.target @27.542s
+└─multi-user.target @27.541s
+  └─dhcpcd.service @5.123s +22.414s
+    └─resolvconf.service @4.396s +687ms
+      └─basic.target @4.321s
+        └─dbus-broker.service @4.458s +304ms
+          └─dbus.socket @4.296s +503us
+            └─sysinit.target @4.287s
+              └─systemd-vconsole-setup.service @9.905s +95ms
+                └─systemd-journald.socket
+                  └─system.slice
+                    └─-.slice

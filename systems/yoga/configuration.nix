@@ -2,7 +2,7 @@
 # your system.  Help is available in the configuration.nix(5) man page
 # and in the NixOS manual (accessible by running ‘nixos-help’).
 
-{ config, pkgs, ... }:
+{ config, lib, pkgs, ... }:
 
 {
   imports =
@@ -13,9 +13,30 @@
 
   # Use the GRUB 2 boot loader
   boot.loader.grub.enable = true;
-  boot.loader.grub.version = 2;
   boot.loader.grub.device = "/dev/mmcblk1";
+  # Reduce boot delay. See docs/yoga.md I-3.6.
+  boot.loader.timeout = 1;
 
+  # Show kernel + systemd output during boot so the ~9s initrd phase
+  # doesn't look like a hang. Without these, kernel log goes only to
+  # the in-memory buffer and the screen is black until the display
+  # manager comes up.
+  boot.kernelParams = [ "console=tty1" ];
+  boot.consoleLogLevel = 4;
+  boot.initrd.verbose = true;
+
+  # Cap journal so logrotate doesn't saturate eMMC reading hundreds of MB.
+  services.journald.extraConfig = ''
+    SystemMaxUse=200M
+    SystemMaxFileSize=20M
+  '';
+
+  # Default is 01:00; move to 05:00 so the slow eMMC I/O burst happens
+  # while the laptop is closed/idle rather than during late-night use.
+  systemd.timers.logrotate.timerConfig = {
+    OnCalendar = lib.mkForce "*-*-* 05:00:00";
+    Persistent = true;
+  };
   networking.hostName = "yoga"; # Define your hostname.
   networking.wireless.enable = true;  # Enables wireless support via wpa_supplicant.
 
@@ -35,6 +56,9 @@
     noarp
     release no
   '';
+  # Don't block boot on DHCP lease acquisition; dhcpcd backgrounds immediately.
+  # See docs/yoga.md I-3.1 (dhcpcd was 22s of 40s baseline boot time).
+  networking.dhcpcd.wait = "background";
   systemd.services.dhcpcd.serviceConfig.TimeoutStopSec = "5s";
 
   # Configure network proxy if necessary
