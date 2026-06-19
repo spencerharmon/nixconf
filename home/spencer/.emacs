@@ -205,7 +205,7 @@
 ;; rest of init — EXWM lives further down and must come up.
 (condition-case err
     (progn
-      (setq cavemacs-default-model "github-copilot/claude-opus-4.7-1m-internal")
+      (setq cavemacs-default-model "github-copilot/gpt-5.5")
       (let ((bin (executable-find "caveman")))
         (when bin (setq cavemacs-binary bin)))
       (require 'cavemacs nil 'noerror))
