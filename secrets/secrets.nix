@@ -25,4 +25,11 @@ in
   # yescrypt hash from /etc/shadow, not the plaintext password. Used
   # by profiles/spencer-password.nix so slock can unlock.
   "spencer-password-hash.age".publicKeys = users ++ [ yoga ];
+  # WireGuard private key for the yoga (yoga-sd-0) peer. Real
+  # cryptographic keypair generated with `wg genkey`/`wg pubkey`; only
+  # the private key is stored (encrypted). The corresponding PUBLIC key
+  # is recorded in the change doc for dependent tasks to consume.
+  # Decryptable by spencer (admin) and the yoga host key so the peer
+  # can read its own private key at runtime.
+  "wireguard-yoga.age".publicKeys = users ++ [ yoga ];
 }
