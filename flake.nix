@@ -108,6 +108,7 @@
           ./users.nix
           ./profiles/yoga-sd.nix
           ./profiles/libxml2-grub-fix.nix
+          ./profiles/wireguard-yoga.nix
           ./systems/yoga-sd-0/configuration.nix
         ];
       };
