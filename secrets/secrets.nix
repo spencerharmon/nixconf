@@ -6,6 +6,14 @@ let
 in
 {
   "wifi-yoga.age".publicKeys = users ++ [ yoga ];
+  # WireGuard private key for the yoga (yoga-sd-0) peer. Real
+  # cryptographic material generated with `wg genkey`; the matching
+  # public key is recorded in
+  # docs/bee-wireguard-yoga-secret-wireguard-yoga-secret.md so
+  # dependent tasks (here and in the linked flux plan) can consume it
+  # without re-deriving. Decryptable by spencer (admin) and the yoga
+  # host key so the peer can bring up its own tunnel at boot.
+  "wireguard-yoga.age".publicKeys = users ++ [ yoga ];
   # "opencode-auth.age" left registered but not consumed by any host module.
   "opencode-auth.age".publicKeys = users ++ [ yoga ];
   # Cross-SD LUKS keyfile. Same 64-byte random blob lives in slot 1
