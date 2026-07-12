@@ -107,6 +107,7 @@
           ./profiles/ai-tools.nix
           ./users.nix
           ./profiles/yoga-sd.nix
+          ./profiles/libxml2-grub-fix.nix
           ./systems/yoga-sd-0/configuration.nix
         ];
       };
