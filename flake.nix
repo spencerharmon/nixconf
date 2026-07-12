@@ -107,6 +107,7 @@
           ./profiles/ai-tools.nix
           ./users.nix
           ./profiles/yoga-sd.nix
+          ./profiles/wireguard-yoga.nix
           ./systems/yoga-sd-0/configuration.nix
         ];
       };
