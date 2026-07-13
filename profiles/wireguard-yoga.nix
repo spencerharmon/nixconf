@@ -14,9 +14,19 @@
 #   - server public key: 6dqts5KM9KJv0mNJHqpu/QS6z46ct2mFGFGj1sAyRC0=
 #   - yoga's assigned pool tunnel address: 10.8.0.3
 #
-# AllowedIPs is the routed split-tunnel flux already settled on in
-# wireguard-routed-lan: the WG pool (10.8.0.0/24) plus the server's
-# real LAN (192.168.1.0/24), routed (not NAT'd) over the tunnel.
+# AllowedIPs: the WG pool (10.8.0.0/24) ONLY.
+#
+# TODO(operator-approved): the flux wireguard-routed-lan split-tunnel spec
+# also wanted the server LAN 192.168.1.0/24 routed over wg0. It is
+# DELIBERATELY EXCLUDED here (operator-approved 2026-07-13). yoga-sd-0 lives
+# physically ON 192.168.1.0/24, and networking.wireguard.interfaces auto-adds
+# `ip route replace 192.168.1.0/24 dev wg0`, which hijacks yoga's own LAN
+# route and blackholes all local connectivity (this bricked a live deploy on
+# 2026-07-13, dropping SSH mid-activation and stranding the host in emergency
+# mode). While yoga is on the home LAN it reaches 192.168.1.0/24 directly and
+# needs no tunnel route for it. Re-adding the LAN subnet requires
+# collision-safe handling (policy routing / a wg-quick PostUp that only adds
+# the route when yoga is NOT already on 192.168.1.0/24) before it is safe.
 { config, ... }:
 {
   age.secrets.wireguard-yoga = {
@@ -32,7 +42,7 @@
       {
         publicKey = "6dqts5KM9KJv0mNJHqpu/QS6z46ct2mFGFGj1sAyRC0=";
         endpoint = "wireguard.polyfam.studio:51820";
-        allowedIPs = [ "10.8.0.0/24" "192.168.1.0/24" ];
+        allowedIPs = [ "10.8.0.0/24" ];
         persistentKeepalive = 25;
       }
     ];
