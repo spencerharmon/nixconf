@@ -25,7 +25,17 @@
 #   --dry-run, -n         Detect device state, print the exact plan (what will
 #                         be done vs skipped, destructive or not), then exit
 #                         WITHOUT changing anything. Still asks for sudo, which
-#                         is only used to read the device.
+#                         is only used to read the device. Also reports (but
+#                         does not perform) any pending nixconf fast-forward.
+#   --no-sync             Do NOT auto-sync $NIXCONF. By default the script
+#                         fetches origin and fast-forwards $NIXCONF to
+#                         origin/main before building, so config fixes landed
+#                         upstream are actually picked up (this tree is a
+#                         separate clone from the one fixes are pushed to). The
+#                         sync ONLY fast-forwards: it never rewinds, never drops
+#                         local commits, and never clobbers a runtime-dirty
+#                         configuration.nix. Use --no-sync to build the local
+#                         tree exactly as-is.
 #   --device=/dev/sdX     Target device (same as DEVICE=...).
 #   -h, --help            Show this help.
 #
@@ -65,11 +75,13 @@ NO_CONFIRM=0
 FORCE=0
 KEEP_MOUNTED=0
 DRY_RUN=0
+NO_SYNC=0
 SUDO_KEEPALIVE_PID=""
 LUKS_PASS=""
 
 log() { printf '\n=== %s ===\n' "$*"; }
 info() { printf '  - %s\n' "$*"; }
+warn() { printf '  ! %s\n' "$*" >&2; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 usage() { sed -n '2,/^set -euo/p' "$0" | sed 's/^# \{0,1\}//; $d'; exit "${1:-0}"; }
@@ -81,6 +93,7 @@ for arg in "$@"; do
     --force)          FORCE=1 ;;
     --keep-mounted)   KEEP_MOUNTED=1 ;;
     -n|--dry-run)     DRY_RUN=1 ;;
+    --no-sync)        NO_SYNC=1 ;;
     --device=*)       DEVICE=${arg#--device=} ;;
     -h|--help)        usage 0 ;;
     *)                die "unknown argument: $arg (see --help)" ;;
@@ -120,6 +133,46 @@ mapper_open() { [[ -b /dev/mapper/$MAPPER ]]; }
 # luks2 luksDump lists each keyslot as e.g. "  1: luks2"
 slot_used() { sudo cryptsetup luksDump "$LUKS_PART" 2>/dev/null | grep -qE "^[[:space:]]+$1: luks2"; }
 
+# ---- keep $NIXCONF current -------------------------------------------------
+# This tree is a SEPARATE clone from the beehive-managed checkout that
+# config fixes are pushed to (both share the same origin/main). Without
+# this sync, a fix landed upstream is silently NOT built here and the
+# deploy reproduces the already-fixed bug. Fast-forward only: never
+# rewind, never drop local commits, never clobber a runtime-dirty
+# configuration.nix (the PARTUUID injection below leaves it dirty).
+sync_nixconf() {
+  git -C "$NIXCONF" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
+    info "$NIXCONF is not a git checkout; building it as-is"; return 0; }
+  if ! git -C "$NIXCONF" fetch --quiet origin 2>/dev/null; then
+    warn "could not fetch origin (offline?); building the local nixconf tree as-is"
+    return 0
+  fi
+  local head upstream
+  upstream=$(git -C "$NIXCONF" rev-parse --verify --quiet origin/main) || {
+    warn "origin/main not found; building local tree as-is"; return 0; }
+  head=$(git -C "$NIXCONF" rev-parse HEAD)
+  if [[ "$head" == "$upstream" ]]; then
+    info "nixconf up to date ($(git -C "$NIXCONF" rev-parse --short HEAD) = origin/main)"
+    return 0
+  fi
+  # Only proceed on a clean fast-forward (HEAD is an ancestor of origin/main).
+  if ! git -C "$NIXCONF" merge-base --is-ancestor "$head" "$upstream"; then
+    die "nixconf HEAD ($(git -C "$NIXCONF" rev-parse --short HEAD)) has commits not on origin/main; reconcile manually. Re-run with --no-sync to build the local tree as-is."
+  fi
+  if [[ $DRY_RUN == 1 ]]; then
+    info "nixconf behind origin/main; WOULD fast-forward $(git -C "$NIXCONF" rev-parse --short "$head") -> $(git -C "$NIXCONF" rev-parse --short "$upstream") (skipped: --dry-run)"
+    return 0
+  fi
+  # FF leaves an untouched dirty configuration.nix in place; if upstream
+  # DID change that file while it is locally dirty, git refuses rather
+  # than clobber -- surface it instead of guessing.
+  if git -C "$NIXCONF" merge --ff-only "$upstream" >/dev/null 2>&1; then
+    info "nixconf fast-forwarded to $(git -C "$NIXCONF" rev-parse --short HEAD) (origin/main)"
+  else
+    die "nixconf fast-forward to origin/main was blocked by local uncommitted changes (likely systems/$TARGET/configuration.nix). Commit or stash them and re-run, or use --no-sync."
+  fi
+}
+
 # ---- sudo: prompt once, keep the timestamp warm ---------------------------
 # sudo is needed just to *inspect* the device (blkid / cryptsetup), so it is
 # acquired before state detection. This is the only credential needed to work
@@ -129,6 +182,14 @@ log "Acquire sudo (prompted once; kept warm for the whole run)"
 sudo -v || die "sudo authentication failed"
 ( while true; do sudo -n true 2>/dev/null || exit; sleep 45; done ) &
 SUDO_KEEPALIVE_PID=$!
+
+# ---- sync nixconf to origin/main (unless --no-sync) ------------------------
+log "Sync nixconf ($NIXCONF)"
+if [[ $NO_SYNC == 1 ]]; then
+  info "sync skipped (--no-sync); building the local tree as-is"
+else
+  sync_nixconf
+fi
 
 # ---- inspect device FIRST -------------------------------------------------
 log "Target device"
