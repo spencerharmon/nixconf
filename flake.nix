@@ -1,7 +1,7 @@
 {
   description = "deploy nixos systems";
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/d233902339c02a9c334e7e593de68855ad26c4cb";
+    nixpkgs.url = "github:nixos/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3";
     deploy-rs.url = "github:serokell/deploy-rs";
     agenix = {
       url = "github:ryantm/agenix";
@@ -107,7 +107,6 @@
           ./profiles/ai-tools.nix
           ./users.nix
           ./profiles/yoga-sd.nix
-          ./profiles/libxml2-grub-fix.nix
           ./systems/yoga-sd-0/configuration.nix
         ];
       };
