@@ -1,5 +1,8 @@
 # profiles/libxml2-grub-fix.nix
 #
+# Full writeup (symptom, diagnosis, why-it-only-surfaced-now, removal
+# condition): docs/libxml2-grub-install-segfault.md
+#
 # WHY THIS EXISTS
 # --------------
 # The pinned nixpkgs (flake input rev d233902) ships a broken toolchain
