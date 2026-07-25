@@ -19,6 +19,7 @@
   home.file.".cave/agent/skills/caveman".source = inputs.caveman-skill;
   home.file.".cave/agent/skills/anthropic-skills".source = inputs.anthropic-skills;
   home.file.".cave/agent/skills/pi-skills".source = inputs.pi-skills;
+  home.file.".cave/agent/skills/nixos-management".source = inputs.nixos-management-skill;
 
   # caveman-code: spencerharmon/caveman-code spencer-dev.
   # Track the fork branch until it can be packaged reproducibly.
@@ -82,10 +83,19 @@
           export PATH="${pkgs.nodejs_24}/bin:${pkgs.git}/bin:$PATH"
           export HUSKY=0
           cd "$REPO"
-          if [ -f package-lock.json ]; then
-            npm ci || { warn "npm ci failed"; exit 0; }
+          # npm ci wipes and reinstalls node_modules wholesale (~670 MB write
+          # storm on the SD -- the dominant trigger of the F-4 emergency_ro
+          # brick, docs/yoga.md). Only pay that cost when node_modules is
+          # missing; otherwise use incremental npm install to minimize SD wear.
+          if [ ! -d node_modules ]; then
+            if [ -f package-lock.json ]; then
+              npm ci || { warn "npm ci failed"; exit 0; }
+            else
+              npm install || { warn "npm install failed"; exit 0; }
+            fi
           else
-            npm install || { warn "npm install failed"; exit 0; }
+            npm install --prefer-offline --no-audit --no-fund \
+              || { warn "npm install failed"; exit 0; }
           fi
           npm run build || { warn "npm run build failed"; exit 0; }
           printf '%s\n' "$BUILD_KEY" > "$STAMP"

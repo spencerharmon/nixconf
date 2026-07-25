@@ -52,9 +52,24 @@
 
   networking.firewall.allowedTCPPorts = [ 22 ];
 
+  # Static resolvers instead of the DHCP-provided gateway. The home/other
+  # wifi gateways run DNS-rebind protection: they return NOERROR/ANCOUNT=0
+  # for public names that resolve to private RFC1918 addresses (e.g.
+  # jellyfin.polyfam.studio -> 192.168.1.99), silently stripping the answer.
+  # That broke resolution of polyfam self-hosted services reachable over the
+  # wg0 tunnel. Trusted public resolvers (Cloudflare, Quad9) don't filter.
+  networking.nameservers = [ "1.1.1.1" "9.9.9.9" ];
+
+  # DNS search domains: bare hostnames (e.g. `jellyfin`) resolve against
+  # these suffixes. Injected as priority-1 static resolvconf entries.
+  networking.search = [ "spencerharmon.com" "polyfam.studio" ];
+
   networking.dhcpcd.extraConfig = ''
     noarp
     release no
+    # Keep dhcpcd from overwriting /etc/resolv.conf with the gateway's
+    # rebind-filtering DNS; networking.nameservers above is authoritative.
+    nohook resolv.conf
   '';
   # Don't block boot on DHCP lease acquisition; dhcpcd backgrounds immediately.
   # See docs/yoga.md I-3.1 (dhcpcd was 22s of 40s baseline boot time).

@@ -194,6 +194,22 @@
         "type": "github"
       }
     },
+    "nixos-management-skill": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1784388419,
+        "narHash": "sha256-PUFWSO5+dNjmgK49xUbbgNtVqxjDsfexeMm4m/FfHkg=",
+        "owner": "michalzubkowicz",
+        "repo": "nixos-management-skill",
+        "rev": "aa1e3a3cec56308cd55e8de897eb728c5051b26d",
+        "type": "github"
+      },
+      "original": {
+        "owner": "michalzubkowicz",
+        "repo": "nixos-management-skill",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1743014863,
@@ -250,6 +266,7 @@
         "caveman-skill": "caveman-skill",
         "deploy-rs": "deploy-rs",
         "home-manager": "home-manager_2",
+        "nixos-management-skill": "nixos-management-skill",
         "nixpkgs": "nixpkgs_2",
         "pi-skills": "pi-skills"
       }

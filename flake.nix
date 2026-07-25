@@ -27,8 +27,12 @@
       url = "github:badlogic/pi-skills";
       flake = false;
     };
+    nixos-management-skill = {
+      url = "github:michalzubkowicz/nixos-management-skill";
+      flake = false;
+    };
   };
-  outputs = inputs@{ self, nixpkgs, deploy-rs, agenix, home-manager, cavemacs, caveman-skill, anthropic-skills, pi-skills }: {
+  outputs = inputs@{ self, nixpkgs, deploy-rs, agenix, home-manager, cavemacs, caveman-skill, anthropic-skills, pi-skills, nixos-management-skill }: {
     nixosConfigurations = {
       chrome1 = nixpkgs.lib.nixosSystem {
         system = "x86_64-linux";
@@ -107,6 +111,7 @@
           ./profiles/ai-tools.nix
           ./users.nix
           ./profiles/yoga-sd.nix
+          ./profiles/yoga-sd-io-throttle.nix
           ./profiles/libxml2-grub-fix.nix
           ./profiles/wireguard-yoga.nix
           ./systems/yoga-sd-0/configuration.nix
