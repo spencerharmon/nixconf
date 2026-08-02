@@ -112,6 +112,29 @@
           ./systems/yoga-sd-0/configuration.nix
         ];
       };
+      # yoga-sd-1: second SD card. Identical module stack to yoga-sd-0;
+      # only the per-card identity (systems/yoga-sd-1/configuration.nix)
+      # differs. See docs/yoga-storage-redesign.md + profiles/yoga-sd.nix.
+      yoga-sd-1 = nixpkgs.lib.nixosSystem {
+        system = "x86_64-linux";
+        specialArgs = { inherit inputs; };
+        modules = [
+          agenix.nixosModules.default
+          ./systems/yoga/configuration.nix
+          ./profiles/laptop.nix
+          ./profiles/wifi-yoga.nix
+          ./profiles/zram.nix
+          ./profiles/spencer-password.nix
+          ./profiles/spencer-home.nix
+          ./profiles/coding-agents.nix
+          ./profiles/ai-tools.nix
+          ./users.nix
+          ./profiles/yoga-sd.nix
+          ./profiles/libxml2-grub-fix.nix
+          ./profiles/wireguard-yoga.nix
+          ./systems/yoga-sd-1/configuration.nix
+        ];
+      };
     };
     deploy = {
       nodes.chrome1 = {
