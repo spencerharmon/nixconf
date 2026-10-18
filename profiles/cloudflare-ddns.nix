@@ -1,8 +1,8 @@
 { config, lib, pkgs, ... }:
 # Per-host Cloudflare dynamic DNS (favonia/cloudflare-ddns — the same
-# client the spray cluster runs as a Deployment). Each host keeps the A/AAAA
-# record `<networking.hostName>.<DDNS_ZONE>` pointed at its own public
-# addresses.
+# client the spray cluster runs as a Deployment). Each host keeps the
+# A record `<networking.hostName>.<DDNS_ZONE>` pointed at its own LAN
+# IPv4 address.
 #
 # The zone and API token are NOT in this public repo. They come from the
 # agenix secret `cloudflare-ddns.env.age`, an env file with:
@@ -37,8 +37,12 @@ in
     restartTriggers = [ config.age.secrets.cloudflare-ddns-env.file ];
 
     environment = {
-      IP4_PROVIDER = "cloudflare.trace";
-      IP6_PROVIDER = "cloudflare.trace";
+      # LAN IPv4 only: publish the host's own default-route source address
+      # (its LAN IP), not the shared NAT public IP that cloudflare.trace
+      # would report for every node. IPv6 is deliberately unpublished;
+      # static.empty actively removes any AAAA left over (none would keep it).
+      IP4_PROVIDER = "local";
+      IP6_PROVIDER = "static.empty";
       UPDATE_CRON = "@every 5m";
       UPDATE_ON_START = "true";
       DELETE_ON_STOP = "false";
