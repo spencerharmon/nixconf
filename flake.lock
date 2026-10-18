@@ -210,6 +210,22 @@
         "type": "github"
       }
     },
+    "nixpkgs-chrome": {
+      "locked": {
+        "lastModified": 1792030654,
+        "narHash": "sha256-OaQwAtPMTjQiY2sT/2/62UbSPhzP/0aDnWzMm/NCiUw=",
+        "owner": "nixos",
+        "repo": "nixpkgs",
+        "rev": "26f4107e47e3ad0ffd0db220469ba83b6f6d96e8",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nixos",
+        "ref": "nixos-26.05",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
     "nixpkgs_2": {
       "locked": {
         "lastModified": 1778869304,
@@ -251,6 +267,7 @@
         "deploy-rs": "deploy-rs",
         "home-manager": "home-manager_2",
         "nixpkgs": "nixpkgs_2",
+        "nixpkgs-chrome": "nixpkgs-chrome",
         "pi-skills": "pi-skills"
       }
     },

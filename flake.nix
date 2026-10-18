@@ -2,6 +2,9 @@
   description = "deploy nixos systems";
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/d233902339c02a9c334e7e593de68855ad26c4cb";
+    # Separate pin for the chrome k3s fleet (stable release branch) so a
+    # server upgrade never drags the Yoga workstation pin along with it.
+    nixpkgs-chrome.url = "github:nixos/nixpkgs/nixos-26.05";
     deploy-rs.url = "github:serokell/deploy-rs";
     agenix = {
       url = "github:ryantm/agenix";
@@ -28,38 +31,41 @@
       flake = false;
     };
   };
-  outputs = inputs@{ self, nixpkgs, deploy-rs, agenix, home-manager, cavemacs, caveman-skill, anthropic-skills, pi-skills }: {
+  outputs = inputs@{ self, nixpkgs, nixpkgs-chrome, deploy-rs, agenix, home-manager, cavemacs, caveman-skill, anthropic-skills, pi-skills }: {
     nixosConfigurations = {
-      chrome1 = nixpkgs.lib.nixosSystem {
+      # chrome1..3: HA k3s fleet, every node a server (embedded etcd).
+      # chrome1 bootstraps the cluster; chrome2/3 join it. Every node runs
+      # cloudflare-ddns for its own <hostname>.<zone>.
+      chrome1 = nixpkgs-chrome.lib.nixosSystem {
         system = "x86_64-linux";
         specialArgs = { inherit inputs; };
         modules = [
           agenix.nixosModules.default
           ./systems/chrome1/configuration.nix
-          ./profiles/kubernetes/controller-worker.nix
-          ./clusters/chrome-kube.nix
+          ./profiles/k3s/server-init.nix
+          ./profiles/cloudflare-ddns.nix
           ./users.nix
         ];
       };
-      chrome2 = nixpkgs.lib.nixosSystem {
+      chrome2 = nixpkgs-chrome.lib.nixosSystem {
         system = "x86_64-linux";
         specialArgs = { inherit inputs; };
         modules = [
           agenix.nixosModules.default
           ./systems/chrome2/configuration.nix
-          ./profiles/kubernetes/worker.nix
-          ./clusters/chrome-kube.nix
+          ./profiles/k3s/server-join.nix
+          ./profiles/cloudflare-ddns.nix
           ./users.nix
         ];
       };
-      chrome3 = nixpkgs.lib.nixosSystem {
+      chrome3 = nixpkgs-chrome.lib.nixosSystem {
         system = "x86_64-linux";
         specialArgs = { inherit inputs; };
         modules = [
           agenix.nixosModules.default
           ./systems/chrome3/configuration.nix
-          ./profiles/kubernetes/worker.nix
-          ./clusters/chrome-kube.nix
+          ./profiles/k3s/server-join.nix
+          ./profiles/cloudflare-ddns.nix
           ./users.nix
         ];
       };

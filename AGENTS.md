@@ -15,12 +15,13 @@ NixOS flake managing chrome hosts plus Yoga's two-part layout: `underyoga` on in
   - `underyoga.nix` — minimal encrypted eMMC recovery/dispatcher system.
   - `yoga-sd.nix` — encrypted SD-root Yoga workstation profile.
   - `zram.nix` + `spencer-password.nix` — shared Yoga-family zram + declarative password hash.
-- `clusters/chrome-kube.nix` — shared k8s cluster settings.
+- `profiles/k3s/` — chrome k3s fleet. `k3s-common.nix` (server role, firewall, imports `common.nix`), `server-init.nix` (`clusterInit`, chrome1), `server-join.nix` (joins via `K3S_URL`, chrome2/3). Token/URL live in agenix env files `k3s-init.env.age` / `k3s-join.env.age`.
+- `profiles/cloudflare-ddns.nix` — favonia cloudflare-ddns systemd unit keeping `<hostName>.<DDNS_ZONE>` A/AAAA current. Token + zone in agenix `cloudflare-ddns.env.age` (zone kept out of this public repo).
 - `home/spencer.nix` + `home/spencer/<file>` — home-manager config + flat files (`.emacs` etc.).
 - `secrets/secrets.nix` + `secrets/*.age` — agenix. Recipients: `spencer` (admin user) + per-host SSH host keys.
 - `users.nix` — `spencer` user + authorized SSH ed25519 key. Applied to every host.
 
-Hosts: `chrome1` (k8s master+node), `chrome2`/`chrome3` (k8s workers, `chromeN.lan`), `underyoga` (minimal eMMC recovery/dispatcher on Yoga), `yoga-sd-0` (primary encrypted-SD Yoga workstation, hostname `yoga`).
+Hosts: `chrome1`/`chrome2`/`chrome3` (HA k3s, all servers w/ embedded etcd; chrome1 bootstraps; pinned to separate `nixpkgs-chrome` input = nixos-26.05), `underyoga` (minimal eMMC recovery/dispatcher on Yoga), `yoga-sd-0` (primary encrypted-SD Yoga workstation, hostname `yoga`).
 
 ## Module wiring quirks
 
@@ -58,8 +59,8 @@ cd secrets && nix run github:ryantm/agenix -- -e <name>.age
 ## Conventions
 
 - `system.stateVersion` is per-host; never change on an existing system.
-- K8s firewall ports → `profiles/kubernetes/controller-worker.nix` (and `worker.nix`).
-- Cluster-wide k8s → `clusters/`. Role → `profiles/kubernetes/`. Hardware/network → `systems/<host>/`.
+- k3s firewall ports / cluster-wide settings → `profiles/k3s/k3s-common.nix`. Hardware/network → `systems/<host>/`.
+- Adding a chrome host's agenix access: put its host key in `secrets/secrets.nix` (`chromeAll`, and `chromeJoiners` if it joins), then rekey.
 - Wifi credentials: never hard-code. Use agenix + `networking.wireless.secretsFile` with `pskRaw = "ext:VARNAME"`. Bound the wpa_supplicant unit to agenix: `systemd.services."wpa_supplicant-<iface>" = { after = [ "agenix.service" ]; wants = [ "agenix.service" ]; }`.
 - Always set `networking.wireless.interfaces = [ "<iface>" ]` so per-interface units are generated (the auto-detect mode is flaky and resists `wpa_cli`).
 

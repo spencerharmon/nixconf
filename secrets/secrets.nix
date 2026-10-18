@@ -3,8 +3,23 @@ let
   users = [ spencer ];
 
   yoga = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINM/rswMb7RDDmbcQv0dYFODi/cgjlHef2WsHbg2wgVe root@yoga";
+
+  # chrome k3s fleet host keys (/etc/ssh/ssh_host_ed25519_key.pub).
+  # chrome2/chrome3 were offline when the k3s secrets were created: add
+  # their keys here, append them to the lists below, and rekey
+  # (`agenix -r`) before deploying them.
+  chrome1 = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAaEZOde5FOqfWGQGU/NniI7OH8Jq2a+TTQ6SgyXpLs0";
+  chromeAll = [ chrome1 ];
+  chromeJoiners = [ ];
 in
 {
+  # k3s cluster-init node env: K3S_TOKEN.
+  "k3s-init.env.age".publicKeys = users ++ [ chrome1 ];
+  # k3s joining-server env: K3S_TOKEN + K3S_URL.
+  "k3s-join.env.age".publicKeys = users ++ chromeJoiners;
+  # Per-host DDNS env: CLOUDFLARE_API_TOKEN + DDNS_ZONE.
+  "cloudflare-ddns.env.age".publicKeys = users ++ chromeAll;
+
   "wifi-yoga.age".publicKeys = users ++ [ yoga ];
   # "opencode-auth.age" left registered but not consumed by any host module.
   "opencode-auth.age".publicKeys = users ++ [ yoga ];
