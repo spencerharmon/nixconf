@@ -69,6 +69,12 @@
           ./users.nix
         ];
       };
+      # Headless USB installer for the chrome fleet (no console needed):
+      # DHCP + sshd with the admin key. See installers/chrome-installer.nix.
+      chrome-installer = nixpkgs-chrome.lib.nixosSystem {
+        system = "x86_64-linux";
+        modules = [ ./installers/chrome-installer.nix ];
+      };
       # underyoga: minimal eMMC-resident NixOS for yoga. Provides the
       # grub dispatcher that finds and chains to yoga-sd's, plus a
       # console-only recovery shell when no SD is inserted. Hostname
