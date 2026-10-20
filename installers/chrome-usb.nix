@@ -17,8 +17,17 @@
 # stick runs at ~170 KiB/s, a sequential dd at ~5 MB/s:
 #   nix build .#chrome-usb-image
 #   dd if=result/nixos.img of=/dev/disk/by-id/usb-<stick> bs=4M conv=fsync oflag=direct
-# Boot it headless with a one-time `efibootmgr --bootnext`, or simply by
-# having no other bootable disk.
+# Boot it headless with a one-time `efibootmgr --bootnext`.
+#
+# Drive swap (internal SSD replaced), learned on chrome1: MrChromebox does NOT
+# fall through a failed boot entry — when the old "Linux Boot Manager" (whose
+# ESP left with the old disk) fails it stops at "Booting ... failed ... Press
+# any key", which needs a keyboard. So BEFORE powering off for the swap, with
+# the stick plugged in, register it and put it FIRST:
+#   efibootmgr -C -d /dev/sdX -p 1 -L chrome-usb -l '\EFI\BOOT\BOOTX64.EFI'
+#   efibootmgr -o <chrome-usb>,<rest...>     # UiApp (firmware setup) last
+# After installing onto the new disk: delete the stale Linux Boot Manager
+# entry and order the new one first (nixos-install adds it), stick after it.
 {
   imports = [
     "${modulesPath}/installer/scan/not-detected.nix"
