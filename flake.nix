@@ -69,11 +69,12 @@
           ./users.nix
         ];
       };
-      # Headless USB installer for the chrome fleet (no console needed):
-      # DHCP + sshd with the admin key. See installers/chrome-installer.nix.
-      chrome-installer = nixpkgs-chrome.lib.nixosSystem {
+      # chrome-usb: installed NixOS on a USB stick for console-less
+      # (re)installs of chrome hosts. installers/chrome-usb.nix; written
+      # from the raw image packages.x86_64-linux.chrome-usb-image.
+      chrome-usb = nixpkgs-chrome.lib.nixosSystem {
         system = "x86_64-linux";
-        modules = [ ./installers/chrome-installer.nix ];
+        modules = [ ./installers/chrome-usb.nix ./users.nix ];
       };
       # underyoga: minimal eMMC-resident NixOS for yoga. Provides the
       # grub dispatcher that finds and chains to yoga-sd's, plus a
@@ -173,6 +174,19 @@
           path = deploy-rs.lib.x86_64-linux.activate.nixos self.nixosConfigurations.chrome3;
         };
       };
+    };
+    # Raw disk image of the chrome-usb system (GPT: ESP + ext4 USBROOT).
+    packages.x86_64-linux.chrome-usb-image = import "${nixpkgs-chrome}/nixos/lib/make-disk-image.nix" {
+      inherit (self.nixosConfigurations.chrome-usb) config pkgs;
+      lib = nixpkgs-chrome.lib;
+      format = "raw";
+      partitionTableType = "efi";
+      bootSize = "512M";
+      label = "USBROOT";
+      diskSize = "auto";
+      additionalSpace = "1G";
+      copyChannel = false;
+      installBootLoader = true;
     };
     checks = builtins.mapAttrs (system: deployLib: deployLib.deployChecks self.deploy) deploy-rs.lib;
   };
