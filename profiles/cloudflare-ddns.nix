@@ -52,6 +52,17 @@ in
     };
 
     serviceConfig = {
+      # network-online can be reached before dhcpcd installs the IPv4
+      # default route; IP4_PROVIDER=local then fails and the updater waits a
+      # full UPDATE_CRON interval. Wait (up to 2 min) for the route first.
+      ExecStartPre = "${pkgs.writeShellScript "wait-ipv4-default-route" ''
+        for _ in $(seq 120); do
+          ${pkgs.iproute2}/bin/ip -4 route get 1.1.1.1 >/dev/null 2>&1 && exit 0
+          sleep 1
+        done
+        echo "no IPv4 default route after 120s" >&2
+        exit 1
+      ''}";
       ExecStart = wrapper;
       DynamicUser = true;
       LoadCredential = "env:${config.age.secrets.cloudflare-ddns-env.path}";
