@@ -10,6 +10,7 @@
 {
   imports = [
     ../common.nix
+    ../chrome-performance.nix
   ];
 
   services.k3s = {
@@ -19,7 +20,12 @@
     # Without it k3s auto-detects per boot and can flip to the IPv6 address,
     # after which it no longer matches its own etcd member URL and never
     # becomes ready. The address is derived at start (below), not hardcoded.
-    extraFlags = [ "--node-ip=\${K3S_NODE_IP}" ];
+    extraFlags = [
+      "--node-ip=\${K3S_NODE_IP}"
+      # zram swap is on (profiles/chrome-performance.nix); kubelet refuses
+      # to start with swap present unless told otherwise.
+      "--kubelet-arg=fail-swap-on=false"
+    ];
   };
 
   systemd.services.k3s.serviceConfig = {

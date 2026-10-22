@@ -5,12 +5,12 @@ let
   yoga = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINM/rswMb7RDDmbcQv0dYFODi/cgjlHef2WsHbg2wgVe root@yoga";
 
   # chrome k3s fleet host keys (/etc/ssh/ssh_host_ed25519_key.pub).
-  # chrome2/chrome3 were offline when the k3s secrets were created: add
-  # their keys here, append them to the lists below, and rekey
-  # (`agenix -r`) before deploying them.
+  # chrome2 is not yet registered: add its key here, append it to the lists
+  # below, and rekey (`agenix -r`) before deploying it.
   chrome1 = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAaEZOde5FOqfWGQGU/NniI7OH8Jq2a+TTQ6SgyXpLs0";
-  chromeAll = [ chrome1 ];
-  chromeJoiners = [ ];
+  chrome3 = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOfDGJWu7jpcz0tl2x++4uYhq1ltzYM2fN6bC0X+7YBf";
+  chromeAll = [ chrome1 chrome3 ];
+  chromeJoiners = [ chrome3 ];
 in
 {
   # k3s cluster-init node env: K3S_TOKEN.
