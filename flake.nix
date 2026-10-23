@@ -42,6 +42,8 @@
         modules = [
           agenix.nixosModules.default
           ./systems/chrome1/configuration.nix
+          ./profiles/wireguard-ha.nix
+          { chrome.wireguardHa = { enable = true; priority = 150; }; }
           ./profiles/k3s/server-init.nix
           ./profiles/cloudflare-ddns.nix
           ./users.nix
@@ -53,6 +55,8 @@
         modules = [
           agenix.nixosModules.default
           ./systems/chrome2/configuration.nix
+          ./profiles/wireguard-ha.nix
+          { chrome.wireguardHa = { enable = true; priority = 100; }; }
           ./profiles/k3s/server-join.nix
           ./profiles/cloudflare-ddns.nix
           ./users.nix
@@ -64,6 +68,8 @@
         modules = [
           agenix.nixosModules.default
           ./systems/chrome3/configuration.nix
+          ./profiles/wireguard-ha.nix
+          { chrome.wireguardHa = { enable = true; priority = 50; }; }
           ./profiles/k3s/server-join.nix
           ./profiles/cloudflare-ddns.nix
           ./users.nix
@@ -188,6 +194,15 @@
       copyChannel = false;
       installBootLoader = true;
     };
+    # Peer management for the HA WireGuard server: nix run .#wg-ha-peers -- list
+    apps.x86_64-linux.wg-ha-peers = let
+      pkgs = nixpkgs-chrome.legacyPackages.x86_64-linux;
+      prog = pkgs.writeShellApplication {
+        name = "wg-ha-peers";
+        runtimeInputs = with pkgs; [ python3 age wireguard-tools qrencode nix ];
+        text = ''exec python3 ${./scripts/wg-ha-peers.py} "$@"'';
+      };
+    in { type = "app"; program = "${prog}/bin/wg-ha-peers"; };
     checks = builtins.mapAttrs (system: deployLib: deployLib.deployChecks self.deploy) deploy-rs.lib;
   };
 }

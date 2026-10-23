@@ -20,6 +20,12 @@ in
   "k3s-join.env.age".publicKeys = users ++ chromeJoiners;
   # Per-host DDNS env: CLOUDFLARE_API_TOKEN + DDNS_ZONE.
   "cloudflare-ddns.env.age".publicKeys = users ++ chromeAll;
+  # HA WireGuard (profiles/wireguard-ha.nix, managed by scripts/wg-ha-peers.py).
+  # State = server + ALL client keys: admin only, never a host.
+  "wg-ha-state.age".publicKeys = users;
+  # Derived from the state by `wg-ha-peers render`; decrypted on every chrome node.
+  "wg-ha-wg0.conf.age".publicKeys = users ++ chromeAll;
+  "wg-ha.env.age".publicKeys = users ++ chromeAll;
 
   "wifi-yoga.age".publicKeys = users ++ [ yoga ];
   # "opencode-auth.age" left registered but not consumed by any host module.

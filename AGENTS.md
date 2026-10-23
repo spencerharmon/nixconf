@@ -16,6 +16,7 @@ NixOS flake managing chrome hosts plus Yoga's two-part layout: `underyoga` on in
   - `yoga-sd.nix` — encrypted SD-root Yoga workstation profile.
   - `zram.nix` + `spencer-password.nix` — shared Yoga-family zram + declarative password hash.
 - `profiles/k3s/` — chrome k3s fleet. `k3s-common.nix` (server role, firewall, imports `common.nix`), `server-init.nix` (`clusterInit`, chrome1), `server-join.nix` (joins via `K3S_URL`, chrome2/3). Token/URL live in agenix env files `k3s-init.env.age` / `k3s-join.env.age`.
+- `profiles/wireguard-ha.nix`: HA WireGuard server (keepalived elects the active node; UPnP lease; armed-gated) — see `docs/wireguard-ha.md`.
 - `profiles/cloudflare-ddns.nix` — favonia cloudflare-ddns systemd unit keeping `<hostName>.<DDNS_ZONE>` A = host LAN IPv4 (no AAAA). Token + zone in agenix `cloudflare-ddns.env.age` (zone kept out of this public repo).
 - `home/spencer.nix` + `home/spencer/<file>` — home-manager config + flat files (`.emacs` etc.).
 - `secrets/secrets.nix` + `secrets/*.age` — agenix. Recipients: `spencer` (admin user) + per-host SSH host keys.
