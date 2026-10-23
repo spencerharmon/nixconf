@@ -159,12 +159,18 @@ in
     };
 
     boot.kernel.sysctl."net.ipv4.ip_forward" = 1;
+    # VRRP adverts (proto 112) between the candidates. nixos-fw is flushed and
+    # rebuilt on every (re)start, so a plain append is idempotent.
+    networking.firewall.extraCommands = ''
+      iptables -A nixos-fw -p vrrp -j nixos-fw-accept
+    '';
     environment.systemPackages = [ cli pkgs.wireguard-tools ];
     systemd.tmpfiles.rules = [ "d ${stateDir} 0700 root root -" "d ${runDir} 0755 root root -" ];
 
     services.keepalived = {
       enable = true;
-      openFirewall = true; # VRRP (proto 112)
+      # NOT openFirewall: its extraStopCommands delete the rule without `|| true`,
+      # which makes every firewall reload fail ("Bad rule") and deploys roll back.
       enableScriptSecurity = true;
       extraGlobalDefs = "script_user root";
       vrrpInstances.wg = {
