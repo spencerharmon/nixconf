@@ -67,6 +67,15 @@
   # a rotating temporary address.
   networking.tempAddresses = "disabled";
 
+  # Public resolvers instead of the DHCP-supplied LAN router: the router's
+  # resolver has DNS-rebinding protection and drops public answers that point
+  # at private addresses, but the in-house service names (the GitOps source,
+  # the metrics push endpoint, ...) deliberately resolve to LAN IPs. Matches the
+  # spray host. Also becomes CoreDNS's upstream (k3s forwards to the host
+  # resolv.conf), so pods resolve them too.
+  networking.nameservers = [ "1.1.1.1" "9.9.9.9" ];
+  networking.dhcpcd.extraConfig = "nohook resolv.conf";
+
   environment.systemPackages = with pkgs; [
     kubectl
   ];
