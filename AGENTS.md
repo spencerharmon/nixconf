@@ -64,6 +64,10 @@ cd secrets && nix run github:ryantm/agenix -- -e <name>.age
 - Wifi credentials: never hard-code. Use agenix + `networking.wireless.secretsFile` with `pskRaw = "ext:VARNAME"`. Bound the wpa_supplicant unit to agenix: `systemd.services."wpa_supplicant-<iface>" = { after = [ "agenix.service" ]; wants = [ "agenix.service" ]; }`.
 - Always set `networking.wireless.interfaces = [ "<iface>" ]` so per-interface units are generated (the auto-detect mode is flaky and resists `wpa_cli`).
 
+## chrome cluster
+
+Hardware (Chromebox CB1, Celeron 2955U: no AVX/AES-NI, 8 GB max RAM, M.2 2242 SATA), MrChromebox firmware boot-order quirk, the headless `chrome-usb` reinstall procedure, and k3s/performance config: [`docs/chrome-cluster.md`](docs/chrome-cluster.md).
+
 ## Yoga gotchas
 
 For full hardware notes, known issues, and planned improvements, see [`docs/yoga.md`](docs/yoga.md). Highlights:
