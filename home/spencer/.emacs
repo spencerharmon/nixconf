@@ -480,16 +480,27 @@ Enables USB tethering over adb and reports the new interface."
                            "android.settings.TETHER_SETTINGS")
       (user-error "No USB interface appeared; enable USB tethering on the phone (settings opened)"))
     (message "android-tether: %s up, waiting for DHCP..." iface)
+    (unless (android-tether--wait
+             (lambda () (string-match-p "\\([0-9]+\\.\\)\\{3\\}[0-9]+/"
+                                        (android-tether--ipv4 iface)))
+             25)
+      (user-error "%s is up but has no IPv4 lease (DHCP pending?)" iface))
+    (message "android-tether: %s %s; starting the phone proxy..."
+             iface (android-tether--ipv4 iface))
+    ;; profiles/android-tether.nix: the dhcpcd hook starts phone-socks.service,
+    ;; which launches the Socks Tether app on the phone and routes via tun2socks.
     (if (android-tether--wait
-         (lambda () (string-match-p "\\([0-9]+\\.\\)\\{3\\}[0-9]+/"
-                                    (android-tether--ipv4 iface)))
-         25)
-        (message "android-tether: %s" (android-tether--ipv4 iface))
-      (message "android-tether: %s is up but has no IPv4 yet (DHCP pending?)" iface))))
+         (lambda () (and (file-exists-p "/sys/class/net/phone0")
+                         (eq 0 (call-process "systemctl" nil nil nil "is-active" "--quiet"
+                                             "phone-socks.service"))))
+         40)
+        (message "android-tether: %s up; internet via the phone proxy (phone0)" iface)
+      (message "android-tether: %s up but phone proxy not running (app installed? M-x shell: journalctl -u phone-socks)" iface))))
 
 (defun android-tether-stop ()
   "Turn USB tethering off (device returns to its default USB mode)."
   (interactive)
+  (call-process "sudo" nil nil nil "systemctl" "stop" "phone-socks.service")
   (let ((res (android-tether--adb "shell" "svc" "usb" "setFunctions")))
     (if (eq (car res) 0)
         (message "android-tether: tethering off")
