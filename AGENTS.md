@@ -11,7 +11,9 @@ NixOS flake managing chrome hosts plus Yoga's two-part layout: `underyoga` on in
   - `laptop.nix` — X + lightdm autologin → EXWM, pipewire, firefox, emacs GUI.
   - `wifi-yoga.nix` — yoga wifi via wpa_supplicant + agenix.
   - `spencer-home.nix` — wires home-manager into the system; consumes `home/spencer.nix`.
-  - `coding-agents.nix` — `claude-code` (note CPU constraints below).
+  - `coding-agents.nix` — `allowUnfree` only (note CPU constraints below).
+  - `ai-tools.nix` — `pi-coding-agent` (Node, no Bun) + `pi-acp` (ACP adapter, packaged from the `pi-acp` flake input). Emacs `agent-shell` (C-c a) drives pi through it.
+  - `android-tether.nix` — lets dhcpcd manage USB-tether interfaces; `M-x android-tether` (C-c t / s-t) enables Android USB tethering over adb.
   - `underyoga.nix` — minimal encrypted eMMC recovery/dispatcher system.
   - `yoga-sd.nix` — encrypted SD-root Yoga workstation profile.
   - `zram.nix` + `spencer-password.nix` — shared Yoga-family zram + declarative password hash.
@@ -78,7 +80,8 @@ For full hardware notes, known issues, and planned improvements, see [`docs/yoga
 - `yoga-sd-0` uses `boot.loader.grub.device = "nodev"`; normal `nixos-rebuild switch --flake .#yoga-sd-0` updates `/boot/grub/grub.cfg` and kernels but does **not** reinstall MBR. Install scripts run `grub-install --boot-directory=/mnt/boot /dev/<current-device>` once at provisioning time.
 - SD wear mitigations on Yoga SD roots: zram swap, no disk swap, `/tmp` tmpfs, `/` ext4 `noatime,commit=60`, `/boot` `noatime`, weekly fstrim, journald capped at 100M.
 - If Yoga SD shows `mmcblk0` I/O errors or root remounts `emergency_ro`, boot `underyoga` and run fsck on `/dev/mmcblk0p1` and `/dev/mapper/yoga-sd-root` before booting the SD again.
-- **CPU is Intel Celeron N3150 (Braswell, no AVX2)**. Bun-based tools (`pkgs.opencode`, `pkgs.bun`) SIGILL on first JIT. Use `pkgs.claude-code` (embedded Node SEA) or `pkgs.codex` (Rust binary) instead. Documented in `profiles/coding-agents.nix`.
+- **CPU is Intel Celeron N3150 (Braswell, no AVX2)**. Bun-based tools (`pkgs.opencode`, `pkgs.bun`) SIGILL on first JIT. Use `pkgs.pi-coding-agent` (plain Node), `pkgs.claude-code` (embedded Node SEA) or `pkgs.codex` (Rust binary) instead. Documented in `profiles/coding-agents.nix`.
+- **wg0 only works off the home LAN**: the router does not hairpin LAN->public-IP traffic, so the tunnel handshake never completes at home. `profiles/wireguard-yoga.nix` leaves wg0 down at boot; a dhcpcd hook starts it when the lease gateway isn't the home router and stops it at home. Manual: `systemctl start|stop wireguard-wg0.target`.
 - IPv6 broken on the local network — `networking.enableIPv6 = false` in `systems/yoga/configuration.nix` (shared by both Yoga targets).
 
 ## Bootstrap from a stuck Nix
