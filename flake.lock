@@ -205,16 +205,16 @@
     "pi-acp": {
       "flake": false,
       "locked": {
-        "lastModified": 1785431124,
-        "narHash": "sha256-fENOOdooi4XbIDjcr02q8qzUCzdo2IW/Bca43SawZ44=",
+        "lastModified": 1784860386,
+        "narHash": "sha256-NksKacRpopm8lAaOG9tbHxJAcr4rlU0uL3dl/VkFbAA=",
         "owner": "svkozak",
         "repo": "pi-acp",
-        "rev": "1bfcb394088ed879db8fd936b570bb626017f878",
+        "rev": "2f6e3c530819489bd09a84139b0b757df6895556",
         "type": "github"
       },
       "original": {
         "owner": "svkozak",
-        "ref": "v0.0.33",
+        "ref": "v0.0.32",
         "repo": "pi-acp",
         "type": "github"
       }
