@@ -117,9 +117,12 @@ in
   # would drop them. Loose mode still rejects unroutable sources.
   networking.firewall.checkReversePath = "loose";
 
-  # Start a proxy session whenever a USB ethernet-style device appears.
+  # Start a proxy session whenever a USB ethernet-style device appears. Match
+  # every non-remove event, not just `add`: the kernel registers usb0 and udev
+  # then renames it, which arrives as a `move` event whose rule run REPLACES the
+  # udev db entry, so an add-only rule would lose SYSTEMD_WANTS.
   services.udev.extraRules = ''
-    ACTION=="add", SUBSYSTEM=="net", DRIVERS=="rndis_host|cdc_ether|cdc_ncm", TAG+="systemd", ENV{SYSTEMD_WANTS}+="phone-socks@$name.service"
+    ACTION!="remove", SUBSYSTEM=="net", DRIVERS=="rndis_host|cdc_ether|cdc_ncm", TAG+="systemd", ENV{SYSTEMD_WANTS}+="phone-socks@$name.service"
   '';
 
   systemd.services."phone-socks@" = {
