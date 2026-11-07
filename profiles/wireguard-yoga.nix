@@ -43,7 +43,7 @@
 # handshakes, the server saw nothing; pointing the endpoint at the server's LAN
 # address handshook immediately, so the key/peer registration are fine). It is
 # also pointless there: the LAN is directly reachable. So wg0 is not started
-# at boot; a dhcpcd hook starts it when the lease's gateway is NOT the home
+# at boot; a route-watching service (wg-yoga-guard) starts it when the best default route is NOT via the home
 # router (other wifi, USB tether) and stops it when yoga is home. Manual:
 # `systemctl start|stop wireguard-wg0.target`.
 { config, lib, pkgs, ... }:
@@ -54,24 +54,38 @@ in
   # Not started at boot; the dhcpcd hook below starts it off the home LAN only.
   systemd.targets.wireguard-wg0.wantedBy = lib.mkForce [ ];
 
-  networking.dhcpcd.runHook = ''
-    gw="''${new_routers:-$routers}"
-    ${pkgs.util-linux}/bin/logger -t wg-yoga-hook "reason=$reason interface=$interface gateway=$gw"
-    case "$reason" in
-      BOUND|REBIND|REOBTAIN)
-        case "$interface" in
-          lo|wg0) ;;
-          *)
-            if [ "$gw" = "${homeGateway}" ]; then
-              ${pkgs.systemd}/bin/systemctl stop --no-block wireguard-wg0.target || true
-            elif [ -n "$gw" ]; then
-              ${pkgs.systemd}/bin/systemctl start --no-block wireguard-wg0.target || true
-            fi
-            ;;
-        esac
-        ;;
-    esac
-  '';
+  # A route-watching service (ip monitor blocks; no polling) starts wg0 when the
+  # best default route does NOT go via the home router (other wifi, phone proxy
+  # link) and stops it at home. A dhcpcd exit hook cannot do this: the NixOS
+  # dhcpcd unit is sandboxed (User=dhcpcd, ProtectSystem=strict,
+  # NoNewPrivileges) and cannot start units.
+  systemd.services.wg-yoga-guard = {
+    description = "Start wg0 only away from the home LAN";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "network.target" ];
+    path = [ pkgs.iproute2 pkgs.gawk pkgs.coreutils pkgs.systemd ];
+    serviceConfig = {
+      Restart = "always";
+      RestartSec = 5;
+    };
+    script = ''
+      want=""
+      evaluate() {
+        # lowest-metric default route: "default [via GW] dev D ... [metric M]"
+        line=$(ip -4 route show default | awk '{m=0; for(i=1;i<NF;i++) if($i=="metric") m=$(i+1); print m, $0}' | sort -n | head -1 | cut -d' ' -f2-)
+        gw=$(echo "$line" | awk '{for(i=1;i<NF;i++) if($i=="via") print $(i+1)}')
+        if [ -z "$line" ]; then new=""
+        elif [ "$gw" = "${homeGateway}" ]; then new=stop
+        else new=start; fi
+        if [ -n "$new" ] && [ "$new" != "$want" ]; then
+          systemctl $new --no-block wireguard-wg0.target || true
+          want=$new
+        fi
+      }
+      evaluate
+      ip monitor route | while read -r _; do evaluate; done
+    '';
+  };
 
   age.secrets.wireguard-yoga = {
     file = ../secrets/wireguard-yoga.age;

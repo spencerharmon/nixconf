@@ -8,11 +8,16 @@
 # serves the USB-tether subnet) and yoga routes through it with tun2socks.
 #
 # Flow:
-#   M-x android-tether       -> phone enters USB tethering (adb)    [home/spencer/.emacs]
-#   dhcpcd leases the USB NIC -> hook starts phone-socks.service    [runHook below]
-#   phone-socks.service      -> starts the app over adb, runs tun2socks, adds a
-#                               default route via tun device phone0
-#   unplug / lease lost      -> hook stops phone-socks.service (route and tun go away)
+#   M-x android-tether        -> phone enters USB tethering (adb)   [home/spencer/.emacs]
+#   udev: USB net device added -> starts phone-socks@<iface>.service
+#   phone-socks@<iface>        -> waits for dhcpcd's lease, starts the app over
+#                                 adb, runs tun2socks, adds a default route via
+#                                 tun device phone0
+#   unplug                     -> the device unit disappears; BindsTo stops the
+#                                 service (route and tun go away)
+# (A dhcpcd exit hook can NOT do this: the NixOS dhcpcd unit is sandboxed -
+# User=dhcpcd, ProtectSystem=strict, NoNewPrivileges - so a hook can log but
+# cannot start units or write under /run.)
 #
 # Nothing here depends on WireGuard. The phone link is a FALLBACK path: its
 # default route has a worse metric than wifi (3002), so it only carries traffic
@@ -26,7 +31,7 @@ let
   proxyPort = "1080";
   tunDev = "phone0";
   tunMetric = "4000";
-  envFile = "/run/phone-socks.env";
+  envFile = "/run/phone-socks/env";
   user = "spencer";
 
   # adb talks to the user's adb server (keys + device authorisation live in
@@ -35,6 +40,16 @@ let
 
   startApp = pkgs.writeShellScript "phone-socks-start-app" ''
     set -eu
+    # The phone is the DHCP "router" of the USB link (dhcpcd is told not to
+    # install that route, see nogateway below, but still records the option).
+    ip=""
+    for i in $(seq 1 90); do
+      ip=$(${pkgs.dhcpcd}/sbin/dhcpcd -U "$PHONE_IFACE" 2>/dev/null | ${pkgs.gnused}/bin/sed -n "s/^routers=//p" | ${pkgs.coreutils}/bin/head -1 | ${pkgs.coreutils}/bin/tr -d "'\"" | ${pkgs.coreutils}/bin/cut -d' ' -f1)
+      [ -n "$ip" ] && break
+      sleep 1
+    done
+    [ -n "$ip" ] || { echo "phone-socks: no DHCP lease on $PHONE_IFACE" >&2; exit 1; }
+    printf 'PHONE_IFACE=%s\nPHONE_IP=%s\n' "$PHONE_IFACE" "$ip" > ${envFile}
     . ${envFile}
     # Start the proxy foreground service on the phone, then wait until it is
     # actually accepting connections over the USB link.
@@ -102,39 +117,24 @@ in
   # would drop them. Loose mode still rejects unroutable sources.
   networking.firewall.checkReversePath = "loose";
 
-  networking.dhcpcd.runHook = ''
-    phone_gw="''${new_routers:-$routers}"
-    phone_drv=""
-    [ -e "/sys/class/net/$interface/device/driver" ] && \
-      phone_drv=$(${pkgs.coreutils}/bin/basename "$(${pkgs.coreutils}/bin/readlink "/sys/class/net/$interface/device/driver")")
-    case "$reason" in
-      BOUND|REBIND|REOBTAIN)
-        case "$phone_drv" in
-          rndis_host|cdc_ether|cdc_ncm)
-            if [ -n "$phone_gw" ]; then
-              printf 'PHONE_IFACE=%s\nPHONE_IP=%s\n' "$interface" "$phone_gw" > ${envFile}
-              ${pkgs.systemd}/bin/systemctl restart --no-block phone-socks.service || true
-            fi
-            ;;
-        esac
-        ;;
-      STOP|EXPIRE|NOCARRIER|FAIL|STOPPED)
-        if [ -f ${envFile} ] && . ${envFile} 2>/dev/null && [ "$interface" = "$PHONE_IFACE" ]; then
-          ${pkgs.systemd}/bin/systemctl stop --no-block phone-socks.service || true
-        fi
-        ;;
-    esac
+  # Start a proxy session whenever a USB ethernet-style device appears.
+  services.udev.extraRules = ''
+    ACTION=="add", SUBSYSTEM=="net", DRIVERS=="rndis_host|cdc_ether|cdc_ncm", TAG+="systemd", ENV{SYSTEMD_WANTS}+="phone-socks@$name.service"
   '';
 
-  systemd.services.phone-socks = {
+  systemd.services."phone-socks@" = {
     description = "Route via the phone's SOCKS5 proxy (Socks Tether over USB)";
     wants = [ "network.target" ];
+    bindsTo = [ "sys-subsystem-net-devices-%i.device" ];
+    after = [ "sys-subsystem-net-devices-%i.device" "dhcpcd.service" ];
+    environment.PHONE_IFACE = "%i";
     unitConfig = {
       StartLimitIntervalSec = 300;
       StartLimitBurst = 5;
     };
     serviceConfig = {
       Type = "simple";
+      RuntimeDirectory = "phone-socks";
       ExecStartPre = startApp;
       ExecStart = run;
       ExecStartPost = up;

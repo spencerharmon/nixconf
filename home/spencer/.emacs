@@ -485,14 +485,14 @@ Enables USB tethering over adb and reports the new interface."
                                         (android-tether--ipv4 iface)))
              25)
       (user-error "%s is up but has no IPv4 lease (DHCP pending?)" iface))
-    (message "android-tether: %s %s; starting the phone proxy..."
+    (message "android-tether: %s %s; waiting for the phone proxy..."
              iface (android-tether--ipv4 iface))
-    ;; profiles/android-tether.nix: the dhcpcd hook starts phone-socks.service,
+    ;; profiles/android-tether.nix: a udev rule starts phone-socks@IFACE.service,
     ;; which launches the Socks Tether app on the phone and routes via tun2socks.
     (if (android-tether--wait
          (lambda () (and (file-exists-p "/sys/class/net/phone0")
                          (eq 0 (call-process "systemctl" nil nil nil "is-active" "--quiet"
-                                             "phone-socks.service"))))
+                                             (format "phone-socks@%s.service" iface)))))
          40)
         (message "android-tether: %s up; internet via the phone proxy (phone0)" iface)
       (message "android-tether: %s up but phone proxy not running (app installed? M-x shell: journalctl -u phone-socks)" iface))))
@@ -500,7 +500,7 @@ Enables USB tethering over adb and reports the new interface."
 (defun android-tether-stop ()
   "Turn USB tethering off (device returns to its default USB mode)."
   (interactive)
-  (call-process "sudo" nil nil nil "systemctl" "stop" "phone-socks.service")
+  (call-process "sudo" nil nil nil "systemctl" "stop" "phone-socks@*.service")
   (let ((res (android-tether--adb "shell" "svc" "usb" "setFunctions")))
     (if (eq (car res) 0)
         (message "android-tether: tethering off")
