@@ -27,8 +27,42 @@
 # needs no tunnel route for it. Re-adding the LAN subnet requires
 # collision-safe handling (policy routing / a wg-quick PostUp that only adds
 # the route when yoga is NOT already on 192.168.1.0/24) before it is safe.
-{ config, ... }:
+#
+# LAN guard (2026-11-06): the tunnel ONLY works away from home. The endpoint
+# resolves to the router's public IP, and the home router does not hairpin
+# (NAT-loopback) LAN-originated traffic to its own WAN address, so on the home
+# LAN the handshake initiation is never answered (verified: wg0 sent
+# handshakes, the server saw nothing; pointing the endpoint at the server's LAN
+# address handshook immediately, so the key/peer registration are fine). It is
+# also pointless there: the LAN is directly reachable. So wg0 is not started
+# at boot; a dhcpcd hook starts it when the lease's gateway is NOT the home
+# router (other wifi, USB tether) and stops it when yoga is home. Manual:
+# `systemctl start|stop wireguard-wg0.target`.
+{ config, lib, pkgs, ... }:
+let
+  homeGateway = "192.168.1.1";
+in
 {
+  # Not started at boot; the dhcpcd hook below starts it off the home LAN only.
+  systemd.targets.wireguard-wg0.wantedBy = lib.mkForce [ ];
+
+  networking.dhcpcd.runHook = ''
+    case "$reason" in
+      BOUND|REBIND|REOBTAIN)
+        case "$interface" in
+          lo|wg0) ;;
+          *)
+            if [ "$new_routers" = "${homeGateway}" ]; then
+              ${pkgs.systemd}/bin/systemctl stop --no-block wireguard-wg0.target || true
+            elif [ -n "$new_routers" ]; then
+              ${pkgs.systemd}/bin/systemctl start --no-block wireguard-wg0.target || true
+            fi
+            ;;
+        esac
+        ;;
+    esac
+  '';
+
   age.secrets.wireguard-yoga = {
     file = ../secrets/wireguard-yoga.age;
     owner = "root";

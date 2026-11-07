@@ -1,23 +1,23 @@
 { config, pkgs, inputs, ... }:
+let
+  # ACP (Agent Client Protocol) adapter: emacs agent-shell speaks ACP, pi
+  # speaks its own RPC; pi-acp bridges them. Not in nixpkgs, so build it from
+  # the pinned flake input (inputs.pi-acp, flake = false).
+  # Refresh npmDepsHash with `nix run nixpkgs#prefetch-npm-deps --
+  # package-lock.json` inside the new checkout after bumping the input.
+  pi-acp = pkgs.buildNpmPackage {
+    pname = "pi-acp";
+    version = "0.0.34";
+    src = inputs.pi-acp;
+    npmDepsHash = "sha256-BvLNtFfp1cMVjzWcMRSdhTqiJrTfbFoUbWkkPW9200o=";
+    # tsup bundles dist/index.js (the package's `bin`).
+  };
+in
 {
-  # cavemacs comes from the spencerharmon/cavemacs flake (registered in
-  # emacsPackages via its overlay; consumed in home/spencer.nix).
-  nixpkgs.overlays = [
-    inputs.cavemacs.overlays.x86_64-linux.default
-
-    # Upstream cavemacs.el declares:
-    #   Package-Requires: ((emacs "30.1") (markdown-mode "2.5") (transient "0.7"))
-    # but the flake's Nix package currently only sets
-    # packageRequires = [ transient ]. Byte-compilation then fails on
-    # `(require 'markdown-mode)`. Patch the package locally until the
-    # cavemacs flake adds markdown-mode itself.
-    (final: prev: {
-      emacsPackagesFor = emacs:
-        (prev.emacsPackagesFor emacs).overrideScope (efinal: eprev: {
-          cavemacs = eprev.cavemacs.overrideAttrs (old: {
-            packageRequires = (old.packageRequires or [ ]) ++ [ efinal.markdown-mode ];
-          });
-        });
-    })
+  # pi (pi-coding-agent) is a plain Node app, so it runs on yoga's N3150
+  # (no AVX2) unlike the Bun-based opencode. pi-acp spawns `pi` from PATH.
+  environment.systemPackages = [
+    pkgs.pi-coding-agent
+    pi-acp
   ];
 }

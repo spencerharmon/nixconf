@@ -14,12 +14,10 @@
       url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    cavemacs = {
-      url = "github:spencerharmon/cavemacs/v0.0.52";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-    caveman-skill = {
-      url = "github:JuliusBrussee/caveman";
+    # ACP adapter that lets emacs agent-shell drive the pi coding agent.
+    # Packaged in profiles/ai-tools.nix (not in nixpkgs).
+    pi-acp = {
+      url = "github:svkozak/pi-acp/v0.0.34";
       flake = false;
     };
     anthropic-skills = {
@@ -31,7 +29,7 @@
       flake = false;
     };
   };
-  outputs = inputs@{ self, nixpkgs, nixpkgs-chrome, deploy-rs, agenix, home-manager, cavemacs, caveman-skill, anthropic-skills, pi-skills }: {
+  outputs = inputs@{ self, nixpkgs, nixpkgs-chrome, deploy-rs, agenix, home-manager, pi-acp, anthropic-skills, pi-skills }: {
     nixosConfigurations = {
       # chrome1..3: HA k3s fleet, every node a server (embedded etcd).
       # chrome1 bootstraps the cluster; chrome2/3 join it. Every node runs
@@ -119,6 +117,7 @@
           ./systems/yoga/configuration.nix
           ./profiles/laptop.nix
           ./profiles/wifi-yoga.nix
+          ./profiles/android-tether.nix
           ./profiles/zram.nix
           ./profiles/spencer-password.nix
           ./profiles/spencer-home.nix
@@ -142,6 +141,7 @@
           ./systems/yoga/configuration.nix
           ./profiles/laptop.nix
           ./profiles/wifi-yoga.nix
+          ./profiles/android-tether.nix
           ./profiles/zram.nix
           ./profiles/spencer-password.nix
           ./profiles/spencer-home.nix

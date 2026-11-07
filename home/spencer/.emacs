@@ -1,7 +1,7 @@
 ;; ===================================
 ;; PATH / exec-path
 ;; ===================================
-;; ~/.local/bin holds user-managed wrappers (e.g. caveman). Prepend
+;; ~/.local/bin holds user-managed wrappers. Prepend
 ;; early so anything in init that calls `executable-find' can find them.
 (let ((local-bin (expand-file-name "~/.local/bin")))
   (when (file-directory-p local-bin)
@@ -197,19 +197,19 @@
 (setq elpy-rpc-python-command "python3")
 
 ;; ===================================
-;; cavemacs
+;; agent-shell (pi coding agent via the pi-acp ACP adapter)
 ;; ===================================
-;; Wrap in condition-case: if caveman binary isn't built yet
-;; (~/git-repos/caveman-code requires manual npm install/build),
-;; cavemacs signals an error on load. Don't let that abort the
-;; rest of init — EXWM lives further down and must come up.
+;; pi-acp and pi come from profiles/ai-tools.nix. Wrapped in
+;; condition-case so a failure here can never abort init: EXWM lives
+;; further down and must come up.
 (condition-case err
     (progn
-      (setq cavemacs-default-model "github-copilot/gpt-5.5")
-      (let ((bin (executable-find "caveman")))
-        (when bin (setq cavemacs-binary bin)))
-      (require 'cavemacs nil 'noerror))
-  (error (message "cavemacs setup skipped: %s" err)))
+      (require 'agent-shell)
+      (setq agent-shell-pi-acp-command '("pi-acp"))
+      ;; C-c a: start a pi session; C-c A: agent-shell's full agent menu.
+      (global-set-key (kbd "C-c a") #'agent-shell-pi-start-agent)
+      (global-set-key (kbd "C-c A") #'agent-shell))
+  (error (message "agent-shell setup skipped: %s" err)))
 
 ;; ===================================
 ;; magit
@@ -326,7 +326,8 @@
                 (,(kbd "s-l") .
                  (lambda ()
                    (interactive)
-                   (start-process-shell-command "slock" nil "slock")))))
+                   (start-process-shell-command "slock" nil "slock")))
+                (,(kbd "s-t") . android-tether)))
         (when (fboundp 'auto-sudoedit-mode) (auto-sudoedit-mode 1)))
     (error (message "EXWM setup failed: %s" err))))
 
@@ -408,3 +409,90 @@ unknown visible networks prompt for PSK, add, and persist."
              (id (wifi--add-network ssid psk)))
         (wifi--wpa "select_network" id)
         (message "wifi: added and selected %s (id %s)" ssid id))))))
+
+;; =====
+;; Android USB tethering. M-x android-tether (C-c t, s-t under EXWM).
+;; Switches a USB-connected Android device into RNDIS (USB tethering)
+;; over adb, then waits for the host-side network interface to appear.
+;; dhcpcd takes the address automatically: profiles/android-tether.nix
+;; lets it manage USB ethernet interfaces. M-x android-tether-stop turns
+;; tethering back off. adb comes from android-tools (profiles/laptop.nix);
+;; USB debugging must be enabled and this host authorised on the phone.
+;; =====
+(defvar android-tether-usb-net-drivers '("rndis_host" "cdc_ether" "cdc_ncm")
+  "Kernel drivers whose net interfaces are USB tethering links.")
+
+(defun android-tether--ifaces ()
+  "Names of network interfaces backed by a USB tethering driver."
+  (let (found)
+    (dolist (dev (directory-files "/sys/class/net" nil "\\`[^.]"))
+      (let ((drv (file-symlink-p
+                  (format "/sys/class/net/%s/device/driver" dev))))
+        (when (and drv (member (file-name-nondirectory drv)
+                               android-tether-usb-net-drivers))
+          (push dev found))))
+    (nreverse found)))
+
+(defun android-tether--ipv4 (iface)
+  (string-trim
+   (with-output-to-string
+     (with-current-buffer standard-output
+       (call-process "ip" nil t nil "-4" "-br" "addr" "show" iface)))))
+
+(defun android-tether--adb (&rest args)
+  "Run adb, return (EXIT . OUTPUT)."
+  (with-temp-buffer
+    (let ((code (apply #'call-process "adb" nil t nil args)))
+      (cons code (string-trim (buffer-string))))))
+
+(defun android-tether--wait (pred secs)
+  "Poll PRED every half second for up to SECS; return its first non-nil value."
+  (let ((deadline (+ (float-time) secs)) val)
+    (while (and (not (setq val (funcall pred))) (< (float-time) deadline))
+      (sit-for 0.5))
+    val))
+
+(defun android-tether ()
+  "Create a network interface from a USB-connected Android device.
+Enables USB tethering over adb and reports the new interface."
+  (interactive)
+  (unless (executable-find "adb") (user-error "adb not found in PATH"))
+  (let ((existing (android-tether--ifaces)))
+    (when existing
+      (user-error "Already tethered: %s"
+                  (mapconcat #'android-tether--ipv4 existing "; "))))
+  (let* ((devs (cdr (android-tether--adb "devices")))
+         (lines (cdr (split-string devs "\n" t))))
+    (cond
+     ((null lines) (user-error "No Android device on adb (plug in, enable USB debugging)"))
+     ((string-match-p "unauthorized" (car lines))
+      (user-error "Device unauthorised: accept the USB debugging prompt on the phone"))
+     ((cdr lines) (user-error "More than one adb device attached: %s" devs))))
+  (message "android-tether: enabling USB tethering...")
+  (let ((res (android-tether--adb "shell" "svc" "usb" "setFunctions" "rndis")))
+    (unless (eq (car res) 0)
+      (user-error "adb svc failed: %s" (cdr res))))
+  (let ((iface (car (android-tether--wait #'android-tether--ifaces 25))))
+    (unless iface
+      ;; Some OEM builds ignore `svc usb setFunctions rndis'; send the user
+      ;; to the toggle instead of failing silently.
+      (android-tether--adb "shell" "am" "start" "-a"
+                           "android.settings.TETHER_SETTINGS")
+      (user-error "No USB interface appeared; enable USB tethering on the phone (settings opened)"))
+    (message "android-tether: %s up, waiting for DHCP..." iface)
+    (if (android-tether--wait
+         (lambda () (string-match-p "\\([0-9]+\\.\\)\\{3\\}[0-9]+/"
+                                    (android-tether--ipv4 iface)))
+         25)
+        (message "android-tether: %s" (android-tether--ipv4 iface))
+      (message "android-tether: %s is up but has no IPv4 yet (DHCP pending?)" iface))))
+
+(defun android-tether-stop ()
+  "Turn USB tethering off (device returns to its default USB mode)."
+  (interactive)
+  (let ((res (android-tether--adb "shell" "svc" "usb" "setFunctions")))
+    (if (eq (car res) 0)
+        (message "android-tether: tethering off")
+      (user-error "adb svc failed: %s" (cdr res)))))
+
+(global-set-key (kbd "C-c t") #'android-tether)
