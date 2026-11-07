@@ -30,6 +30,7 @@ let
   cfg = config.chrome.wireguardHa;
   stateDir = "/var/lib/wg-ha";
   runDir = "/run/wg-ha";
+  metricsDir = "/var/lib/wg-ha-metrics";
   conf = config.age.secrets."wg0.conf".path;
   envFile = config.age.secrets.wg-ha-env.path;
   path = with pkgs; [ wireguard-tools iproute2 iptables miniupnpc gnugrep gnused coreutils systemd bash ];
@@ -182,6 +183,40 @@ in
         trackInterfaces = [ cfg.interface ];
         extraConfig = ''notify "${notify}"'';
       };
+    };
+
+    # Read-only health observer -> node_exporter textfile (metric contract:
+    # docs/wireguard-ha-health-metrics.md). Root is needed only for the
+    # netlink `wg show` query; the unit is otherwise sandboxed and can write
+    # only its textfile dir.
+    systemd.services.wg-ha-health = {
+      description = "WireGuard HA: health textfile collector (read-only)";
+      path = with pkgs; [ wireguard-tools iproute2 miniupnpc gnugrep gnused gawk coreutils inetutils ];
+      environment = { WG_HA_ENV_FILE = envFile; WG_HA_NODE = config.networking.hostName; };
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = "${pkgs.bash}/bin/bash ${../scripts/wg-ha-health-collector.sh} collect ${metricsDir}/wg_ha.prom";
+        TimeoutStartSec = "45s";
+        StateDirectory = "wg-ha-metrics";
+        StateDirectoryMode = "0755";
+        ProtectSystem = "strict";
+        ReadWritePaths = [ metricsDir ];
+        ProtectHome = true;
+        PrivateTmp = true;
+        NoNewPrivileges = true;
+        CapabilityBoundingSet = [ "CAP_NET_ADMIN" ];
+        RestrictAddressFamilies = [ "AF_UNIX" "AF_INET" "AF_INET6" "AF_NETLINK" ];
+      };
+    };
+    systemd.timers.wg-ha-health = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = { OnBootSec = "30s"; OnUnitActiveSec = "30s"; AccuracySec = "5s"; };
+    };
+    services.prometheus.exporters.node = {
+      enable = true;
+      port = 9101; # avoid any in-cluster node-exporter on 9100
+      enabledCollectors = [ "textfile" ];
+      extraFlags = [ "--collector.textfile.directory=${metricsDir}" ];
     };
 
     systemd.services.wg-ha-active = {
