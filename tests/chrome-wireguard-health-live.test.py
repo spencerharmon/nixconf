@@ -158,6 +158,19 @@ else: sys.exit(9)
                 with self.subTest(change=change):
                     invoke(data, False)
 
+    def test_node_exporter_float_rendering_is_accepted_exactly(self):
+        # node_exporter serves large textfile values in Go %g form.
+        rendered = self.text["a"].replace(f"}} {NOW}\n", f"}} {NOW / 1e9:.9f}e+09\n")
+        self.assertIn("e+09", rendered)
+        self.scrapes = dict(self.scrapes, a=rendered)
+        self.run_live()
+        for bad in (f"{NOW / 1e9:.9f}5e+09", "1.5"):
+            self.scrapes = dict(self.scrapes, a=self.text["a"].replace(
+                "wg_ha_armed{cluster=\"chrome\",node=\"a\"} 1",
+                f"wg_ha_armed{{cluster=\"chrome\",node=\"a\"}} {bad}"))
+            with self.assertRaises(live.Invalid):
+                self.run_live()
+
     def test_wrong_successful_direct_body_does_not_fall_back(self):
         self.scrapes["a"] = self.text["b"]
         with self.assertRaises(live.Invalid):
