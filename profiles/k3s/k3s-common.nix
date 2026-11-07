@@ -52,12 +52,14 @@
       2379 # etcd client
       2380 # etcd peer
       10250 # kubelet metrics
+      25565 # Minecraft Java (hostNetwork pod; LAN/VPN only - no router mapping)
     ];
     allowedTCPPortRanges = [
       { from = 30000; to = 32767; } # NodePort services
     ];
     allowedUDPPorts = [
       8472 # flannel VXLAN
+      19132 # Minecraft Bedrock via Geyser (hostNetwork pod; UPnP-mapped by the pod)
     ];
     trustedInterfaces = [ "cni0" "flannel.1" ];
   };
