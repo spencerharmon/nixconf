@@ -19,7 +19,8 @@
 #   WG_HA_CMD_TIMEOUT (5)  per-command timeout seconds
 #   WG_HA_HANDSHAKE_HEALTHY (180)  handshake age considered healthy
 #   WG_HA_NOW       override epoch (tests)
-#   WG_HA_MAX_AGE (180)  evaluate: max observation age before "stale"
+#   WG_HA_MAX_AGE (120)  evaluate: max observation age before "stale"
+#   WG_HA_EXPECTED_NODES  evaluate: required space-separated inventory
 set -uo pipefail
 
 CLUSTER=chrome
@@ -59,24 +60,36 @@ collect() {
   echo "wg_ha_armed{$L} $([ -e "$statedir/armed" ] && echo 1 || echo 0)"
 
   # --- UPnP lease (list only) ---
-  local url="" port=51820 own="" lease_ok=0 owned=0 remaining="" holder=""
+  local url="" port=51820 own="" lease_ok=0 owned=0 remaining="" holder="" settings=""
   if [ -n "${WG_HA_ENV_FILE:-}" ] && [ -r "$WG_HA_ENV_FILE" ]; then
-    url=$( set +u; . "$WG_HA_ENV_FILE" >/dev/null 2>&1; printf '%s' "${WG_HA_UPNP_URL:-}")
-    port=$( set +u; . "$WG_HA_ENV_FILE" >/dev/null 2>&1; printf '%s' "${WG_HA_PORT:-51820}")
+    settings=$(timeout -k 1 "$to" bash -c '
+      unset WG_HA_UPNP_URL WG_HA_PORT
+      . "$1" >/dev/null 2>&1 || exit 1
+      if [ -e "$2/override.env" ]; then
+        . "$2/override.env" >/dev/null 2>&1 || exit 1
+      fi
+      printf "%s\n%s\n" "${WG_HA_UPNP_URL:-}" "${WG_HA_PORT:-51820}"
+    ' router-env "$WG_HA_ENV_FILE" "$statedir" 2>/dev/null) || settings=""
+    url=$(printf '%s\n' "$settings" | head -1)
+    port=$(printf '%s\n' "$settings" | tail -1)
   fi
-  own=${WG_HA_OWN_IP:-$(timeout "$to" ip -4 -o route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p')}
+  echo "wg_ha_config_override_present{$L} $([ -e "$statedir/override.env" ] && echo 1 || echo 0)"
+  if [[ "$port" =~ ^[1-9][0-9]{0,4}$ ]] && [ "$port" -le 65535 ]; then
+    echo "wg_ha_config_port{$L} $port"
+  else port=""; fi
+  own=${WG_HA_OWN_IP:-$(timeout -k 1 "$to" ip -4 -o route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p')}
   if [ -n "$url" ] && [[ "$port" =~ ^[0-9]+$ ]]; then
     local out rc
-    out=$(timeout "$to" upnpc -u "$url" -l 2>/dev/null); rc=$?
-    if [ $rc = 0 ] && printf '%s\n' "$out" | grep -qiE 'external ?ip|^ *i protocol|->'; then
+    out=$(timeout -k 1 "$to" upnpc -u "$url" -l 2>/dev/null); rc=$?
+    if [ $rc = 0 ] && [ -n "$own" ] && printf '%s\n' "$out" | grep -qE '^ *i protocol exPort->inAddr:inPort'; then
       lease_ok=1
       # e.g. " 0 UDP 51820->192.0.2.10:51820  'wg-ha' '' 97"
       local line
-      line=$(printf '%s\n' "$out" | grep -E "^ *[0-9]+ +UDP +$port->[0-9.]+:[0-9]+ " | head -1)
+      line=$(printf '%s\n' "$out" | grep -E "^ *[0-9]+ +UDP +$port->")
       if [ -n "$line" ]; then
-        holder=$(printf '%s' "$line" | sed -E "s/.*$port->([0-9.]+):.*/\1/")
-        remaining=$(printf '%s' "$line" | awk '{print $NF}')
-        [[ "$remaining" =~ ^[0-9]+$ ]] || { remaining=""; lease_ok=0; }
+        if [[ "$line" =~ ^[[:space:]]*[0-9]+[[:space:]]+UDP[[:space:]]+$port\-\>([0-9.]+):$port[[:space:]]+.*[[:space:]]([0-9]+)$ ]] && [[ "$line" != *$'\n'* ]]; then
+          holder=${BASH_REMATCH[1]}; remaining=${BASH_REMATCH[2]}
+        else lease_ok=0; fi
         [ -n "$own" ] && [ "$holder" = "$own" ] && owned=1
       fi
     fi
@@ -100,15 +113,31 @@ collect() {
   fi
 
   # --- handshakes (targeted query; public keys only) ---
-  local hs_ok=0 hs
-  hs=$(timeout "$to" wg show "$ifc" latest-handshakes 2>/dev/null); local rc=$?
-  if [ $rc = 0 ]; then
+  local hs_ok=0 hs="" interfaces present=0 rc=1
+  if interfaces=$(timeout -k 1 "$to" wg show interfaces 2>/dev/null); then
+    local interface_ok=1 i
+    for i in $interfaces; do
+      [[ "$i" =~ ^[A-Za-z0-9_.-]{1,15}$ ]] || interface_ok=0
+      [ "$i" = "$ifc" ] && present=1
+    done
+    if [ "$interface_ok" = 1 ]; then
+      echo "wg_ha_interface_present{$L} $present"
+    else present=0; errors=$((errors+1)); fi
+    if [ "$present" = 1 ]; then
+      hs=$(timeout -k 1 "$to" wg show "$ifc" latest-handshakes 2>/dev/null); rc=$?
+      [ "$rc" = 0 ] || errors=$((errors+1))
+    fi
+  else errors=$((errors+1)); fi
+  if [ "$rc" = 0 ]; then
     hs_ok=1
     local bad=0
+    local -A peers_seen=()
     while IFS=$'\t' read -r pk ts; do
       [ -z "$pk" ] && continue
-      [[ "$pk" =~ ^[A-Za-z0-9+/]{43}=$ ]] && [[ "$ts" =~ ^[0-9]+$ ]] || { bad=1; continue; }
+      [[ "$pk" =~ ^[A-Za-z0-9+/]{43}=$ ]] && [[ "$ts" =~ ^(0|[1-9][0-9]{0,10})$ ]] && [ "$ts" -le "$t" ] || { bad=1; continue; }
       local id; id=$(printf '%s' "$pk" | sha256sum | cut -c1-12)
+      [ -z "${peers_seen[$id]:-}" ] || { bad=1; continue; }
+      peers_seen[$id]=1
       echo "wg_ha_peer_last_handshake_timestamp_seconds{$L,peer=\"$id\"} $ts"
       if [ "$ts" = 0 ]; then
         echo "wg_ha_peer_never_handshaken{$L,peer=\"$id\"} 1"
@@ -131,34 +160,8 @@ collect() {
   echo "wg_ha_collector_errors{$L} $errors"
 }
 
-# value <file> <metric-prefix-regex>: first sample value matching
-val() { grep -E "^$2[{ ]" "$1" | head -1 | awk '{print $NF}'; }
-
 evaluate() {
-  local maxage=${WG_HA_MAX_AGE:-180} t leaders=0 stale=0 missing=0
-  t=$(now)
-  for f in "$@"; do
-    if [ ! -s "$f" ]; then missing=$((missing+1)); echo "node_file=$f status=missing"; continue; fi
-    local ts role owned rem
-    ts=$(val "$f" wg_ha_observation_timestamp_seconds)
-    if ! [[ "$ts" =~ ^[0-9]+$ ]] || [ $((t - ts)) -gt "$maxage" ]; then
-      stale=$((stale+1)); echo "node_file=$f status=stale"; continue
-    fi
-    role=$(grep -E '^wg_ha_role\{.*state="MASTER"' "$f" | awk '{print $NF}')
-    owned=$(val "$f" wg_ha_upnp_lease_owned); rem=$(val "$f" wg_ha_upnp_lease_remaining_seconds)
-    if [ "$role" = 1 ] && [ "$owned" = 1 ] && [[ "$rem" =~ ^[0-9]+$ ]] && [ "$rem" -gt 0 ]; then
-      leaders=$((leaders+1)); echo "node_file=$f status=leader"
-    elif [ "$role" = 1 ]; then
-      leaders=$((leaders+1)); echo "node_file=$f status=leader_without_lease"; stale=$((stale+1))
-    else
-      echo "node_file=$f status=follower"
-    fi
-  done
-  if [ $missing -gt 0 ] || [ $stale -gt 0 ]; then echo "verdict=degraded_observation"; return 3
-  elif [ $leaders = 0 ]; then echo "verdict=no_leader"; return 4
-  elif [ $leaders -gt 1 ]; then echo "verdict=multiple_leaders"; return 5
-  fi
-  echo "verdict=ok"
+  python3 "${WG_HA_VALIDATOR:-$(dirname "$0")/wg-ha-health-validate.py}" evaluate "$@"
 }
 
 case "${1:-}" in

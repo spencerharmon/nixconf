@@ -12,6 +12,7 @@
 #       with its observed role / lease holder / handshake set and evaluates the
 #       fleet. Does NOT claim Mimir ingestion and changes nothing.
 set -uo pipefail
+export PYTHONDONTWRITEBYTECODE=1
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 FAILS=0
 pass() { echo "ok   - $*"; }
@@ -20,56 +21,42 @@ has() { grep -qF -- "$2" "$1" && pass "$3" || { fail "$3 (missing: $2)"; sed 's/
 hasnt() { grep -qF -- "$2" "$1" && { fail "$3 (unexpected: $2)"; sed 's/^/     | /' "$1"; } || pass "$3"; }
 
 if [ "${1:-}" = --live ]; then
-  : "${WG_HA_LIVE_HOSTS:?set WG_HA_LIVE_HOSTS to the ssh targets of every chrome node}"
-  T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
-  ssh_() { timeout 20 ssh -o BatchMode=yes -o ConnectTimeout=5 "$@"; }
-  files=()
-  for h in $WG_HA_LIVE_HOSTS; do
-    f="$T/$(echo "$h" | tr -c 'A-Za-z0-9.\n' _).prom"; files+=("$f")
-    ssh_ "$h" cat /var/lib/wg-ha-metrics/wg_ha.prom >"$f" || { fail "$h: textfile unreadable"; continue; }
-    ssh_ "$h" systemctl is-active wg-ha-health.timer >/dev/null && pass "$h: timer active" || fail "$h: timer inactive"
-    curl -sf --max-time 5 "http://$h:9101/metrics" >/dev/null 2>&1 || \
-      ssh_ "$h" curl -sf --max-time 5 http://127.0.0.1:9101/metrics >"$T/scrape" && grep -q '^wg_ha_observation_timestamp_seconds' "$T/scrape" \
-      && pass "$h: node_exporter serves wg_ha_* on :9101" || fail "$h: node_exporter :9101 lacks wg_ha_*"
-    state=$(ssh_ "$h" cat /run/wg-ha/vrrp-state 2>/dev/null | tr -d '[:space:]')
-    [ -n "$state" ] && has "$f" "state=\"$state\"} 1" "$h: exported role matches host vrrp-state ($state)"
-    holder=$(ssh_ "$h" wg-ha status 2>/dev/null | sed -n 's/^upnp holder: //p')
-    if [ "$state" = MASTER ]; then
-      has "$f" "wg_ha_upnp_lease_owned{" "$h: leader exports lease ownership"
-      grep -qE '^wg_ha_upnp_lease_owned\{.*\} 1$' "$f" && pass "$h: leader owns lease (holder $holder)" || fail "$h: leader does not own lease"
-      n_host=$(ssh_ "$h" sudo -n wg show wg0 latest-handshakes 2>/dev/null | grep -c . || true)
-      n_exp=$(grep -c '^wg_ha_peer_last_handshake_timestamp_seconds' "$f")
-      [ "$n_host" = "$n_exp" ] && pass "$h: peer count $n_exp matches wg" || fail "$h: peers exported=$n_exp host=$n_host"
-    fi
-    grep -qiE 'private|PrivateKey' "$f" && fail "$h: key material in textfile" || pass "$h: no key material"
-  done
-  WG_HA_MAX_AGE=120 bash "$ROOT/scripts/wg-ha-health-collector.sh" evaluate "${files[@]}" \
-    && pass "fleet: exactly one fresh leader with a valid lease" || fail "fleet verdict not ok"
-  echo "failures: $FAILS"; [ $FAILS = 0 ]; exit
+  exec python3 "$ROOT/scripts/wg-ha-health-live.py" live
 fi
+
+python3 "$ROOT/tests/chrome-wireguard-health-live.test.py" \
+  && pass "simulated --live regressions" || fail "simulated --live regressions"
 
 # ---------- NixOS wiring (evaluated, not grepped) ----------
 COLLECTOR=""
 for n in chrome1 chrome2 chrome3; do
-  j=$(cd "$ROOT" && nix eval --json ".#nixosConfigurations.$n.config" --apply 'c: {
+  j=$(nix eval --json "path:$ROOT#nixosConfigurations.$n.config" --apply 'c: {
       exec = c.systemd.services.wg-ha-health.serviceConfig.ExecStart;
       type = c.systemd.services.wg-ha-health.serviceConfig.Type;
       prot = c.systemd.services.wg-ha-health.serviceConfig.ProtectSystem;
       rw = c.systemd.services.wg-ha-health.serviceConfig.ReadWritePaths;
       node = c.systemd.services.wg-ha-health.environment.WG_HA_NODE;
+      validator = c.systemd.services.wg-ha-health.environment.WG_HA_VALIDATOR;
       timer = c.systemd.timers.wg-ha-health.wantedBy;
       every = c.systemd.timers.wg-ha-health.timerConfig.OnUnitActiveSec;
       ne = c.services.prometheus.exporters.node.enable;
       port = c.services.prometheus.exporters.node.port;
+      caps = c.systemd.services.wg-ha-health.serviceConfig.CapabilityBoundingSet;
+      hidden = c.systemd.services.wg-ha-health.serviceConfig.InaccessiblePaths;
+      helper = builtins.any (p: p.name == "wg-ha-health-observe") c.environment.systemPackages;
       flags = c.services.prometheus.exporters.node.extraFlags; }' 2>/dev/null) \
     || { fail "$n: nix eval of wg-ha-health wiring"; continue; }
   echo "$j" | jq -e --arg n "$n" '.type=="oneshot" and .prot=="strict" and .rw==["/var/lib/wg-ha-metrics"]
       and .node==$n and (.timer|index("timers.target")) != null and .every=="30s"
       and .ne and .port==9101 and (.flags|index("--collector.textfile.directory=/var/lib/wg-ha-metrics")) != null
+      and .caps==["CAP_NET_ADMIN"] and (.hidden|length)==1 and .helper
+      and (.validator|startswith("/nix/store/"))
       and (.exec|test(" collect /var/lib/wg-ha-metrics/wg_ha.prom$"))' >/dev/null \
     && pass "$n: service/timer/textfile/node_exporter wiring" || fail "$n: wiring $j"
   COLLECTOR=$(echo "$j" | jq -r '.exec' | awk '{print $2}')
+  export WG_HA_VALIDATOR=$(echo "$j" | jq -r '.validator')
 done
+[ -r "${WG_HA_VALIDATOR:-}" ] || fail "validator store path from service environment"
 [ -x "$COLLECTOR" ] || [ -r "$COLLECTOR" ] || { fail "collector store path from ExecStart"; COLLECTOR="$ROOT/scripts/wg-ha-health-collector.sh"; }
 echo "# collector under test: $COLLECTOR"
 
@@ -79,6 +66,7 @@ mkdir -p "$T/bin"
 cat >"$T/bin/wg" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" >>"$SIM/wg.calls"
+[ "$*" = "show interfaces" ] && { [ "$SIM_WG" = down ] || echo wg0; exit 0; }
 [ "$*" = "show wg0 latest-handshakes" ] || { echo "unexpected wg args: $*" >&2; exit 9; }
 case "$SIM_WG" in
   sleep) sleep 30 ;; down) echo "Unable to access interface: No such device" >&2; exit 1 ;;
@@ -124,7 +112,7 @@ has $P "wg_ha_peer_last_handshake_timestamp_seconds{cluster=\"chrome\",node=\"he
 has $P "wg_ha_peer_healthy{cluster=\"chrome\",node=\"healthy\",peer=\"$ID1\"} 1" "healthy: peer healthy"
 has $P 'wg_ha_collector_errors{cluster="chrome",node="healthy"} 0' "healthy: no errors"
 hasnt $P "$K1" "healthy: raw public key not exported"
-grep -vq 'latest-handshakes' "$T/healthy/wg.calls" && fail "only targeted wg query" || pass "only targeted wg query (no dump/showconf)"
+grep -vEx 'show interfaces|show wg0 latest-handshakes' "$T/healthy/wg.calls" && fail "only targeted wg query" || pass "only targeted wg query (no dump/showconf)"
 
 # follower: lease held by another node, wg0 down
 prep follower; echo BACKUP >"$T/follower/run/vrrp-state"; run follower SIM_IP=192.0.2.11 SIM_WG=down
@@ -176,15 +164,47 @@ cat "$T"/*.prom | grep -qiE 'privatekey|private_key|WG_HA_UPNP_URL|rootDesc' && 
 grep -h . "$T"/*/upnpc.calls | grep -v ' -l$' && fail "mutating upnpc" || pass "upnpc used read-only (-l)"
 
 # ---------- fleet verdicts ----------
-ev() { WG_HA_NOW=$NOW bash "$COLLECTOR" evaluate "$@" >"$T/ev" 2>&1; echo $?; }
+ev() {
+  local nodes="" f
+  for f in "$@"; do nodes+="$(basename "$f" .prom) "; done
+  WG_HA_EXPECTED_NODES="$nodes" WG_HA_NOW=$NOW bash "$COLLECTOR" evaluate "$@" >"$T/ev" 2>&1; echo $?
+}
 [ "$(ev $T/healthy.prom $T/follower.prom)" = 0 ] && grep -q verdict=ok "$T/ev" && pass "fleet: one leader ok" || { fail "fleet ok"; cat "$T/ev"; }
 [ "$(ev $T/follower.prom $T/missing.prom)" != 0 ] && pass "fleet: no-leader/missing rejected" || fail "fleet no-leader"
-[ "$(ev $T/follower.prom $T/follower.prom)" = 4 ] && grep -q verdict=no_leader "$T/ev" && pass "fleet: no_leader" || fail "fleet no_leader"
-cp $T/healthy.prom $T/healthy2.prom
+prep follower2; echo BACKUP >"$T/follower2/run/vrrp-state"; run follower2 SIM_IP=192.0.2.12 SIM_WG=down
+[ "$(ev $T/follower.prom $T/follower2.prom)" = 4 ] && grep -q verdict=no_leader "$T/ev" && pass "fleet: no_leader" || fail "fleet no_leader"
+prep healthy2; echo MASTER >"$T/healthy2/run/vrrp-state"; run healthy2 SIM_IP=192.0.2.11
 [ "$(ev $T/healthy.prom $T/healthy2.prom)" = 5 ] && grep -q verdict=multiple_leaders "$T/ev" && pass "fleet: split leader detected" || { fail "split leader"; cat "$T/ev"; }
-[ "$(WG_HA_NOW=$((NOW+1000)) bash "$COLLECTOR" evaluate $T/healthy.prom $T/follower.prom >/dev/null; echo $?)" = 3 ] && pass "fleet: stale observations degraded" || fail "fleet stale"
+[ "$(WG_HA_EXPECTED_NODES='healthy follower' WG_HA_NOW=$((NOW+1000)) bash "$COLLECTOR" evaluate $T/healthy.prom $T/follower.prom >/dev/null; echo $?)" = 3 ] && pass "fleet: stale observations degraded" || fail "fleet stale"
 [ "$(ev $T/healthy.prom $T/nonexistent.prom)" = 3 ] && pass "fleet: missing node file degraded" || fail "fleet missing file"
 [ "$(ev $T/expired.prom $T/follower.prom)" = 3 ] && grep -q leader_without_lease "$T/ev" && pass "fleet: leader with expired lease rejected" || { fail "fleet expired"; cat "$T/ev"; }
+
+# Review reproductions: a healthy leader must never mask unknown followers.
+for c in missing malformed tmo; do
+  [ "$(ev "$T/healthy.prom" "$T/$c.prom")" = 3 ] && pass "fleet: healthy plus $c rejected" || fail "fleet: healthy masks $c"
+done
+for delta in -1 97 100 121; do
+  [ "$(WG_HA_EXPECTED_NODES='healthy follower' WG_HA_NOW=$((NOW+delta)) bash "$COLLECTOR" evaluate "$T/healthy.prom" "$T/follower.prom" >/dev/null; echo $?)" = 3 ] \
+    && pass "fleet: future/elapsed lease at delta=$delta rejected" || fail "fleet: time delta=$delta"
+done
+[ "$(WG_HA_EXPECTED_NODES='healthy follower' WG_HA_NOW=$NOW bash "$COLLECTOR" evaluate "$T/healthy.prom" "$T/healthy.prom" >/dev/null; echo $?)" = 3 ] \
+  && pass "fleet: duplicate identity rejected" || fail "fleet: duplicate identity"
+[ "$(WG_HA_EXPECTED_NODES='healthy follower absent' WG_HA_NOW=$NOW bash "$COLLECTOR" evaluate "$T/healthy.prom" "$T/follower.prom" >/dev/null; echo $?)" = 3 ] \
+  && pass "fleet: omitted expected node rejected" || fail "fleet: omitted node"
+prep wrongport; echo MASTER >"$T/wrongport/run/vrrp-state"
+printf " i protocol exPort->inAddr:inPort description remoteHost leaseTime\n 0 UDP 51820->192.0.2.10:9999 'wg-ha' '' 97\n" >"$T/wrongport/upnp"
+run wrongport
+has "$T/wrongport.prom" 'wg_ha_upnp_lease_observed{cluster="chrome",node="wrongport"} 0' "wrong internal port rejected"
+prep override; mkdir -p "$T/override/state"; echo MASTER >"$T/override/run/vrrp-state"
+printf 'WG_HA_PORT=51821\nWG_HA_UPNP_URL=http://192.0.2.2/rootDesc.xml\n' >"$T/override/state/override.env"
+printf " i protocol exPort->inAddr:inPort description remoteHost leaseTime\n 0 UDP 51821->192.0.2.10:51821 'wg-ha' '' 97\n" >"$T/override/upnp"
+run override
+has "$T/override.prom" 'wg_ha_config_port{cluster="chrome",node="override"} 51821' "override effective port exported"
+has "$T/override.prom" 'wg_ha_config_override_present{cluster="chrome",node="override"} 1' "override presence exported"
+has "$T/override.prom" 'wg_ha_upnp_lease_owned{cluster="chrome",node="override"} 1' "override mapping observed"
+has "$T/override/upnpc.calls" '-u http://192.0.2.2/rootDesc.xml -l' "override URL queried"
+has "$T/tmo.prom" 'wg_ha_collector_errors{cluster="chrome",node="tmo"} 2' "wg timeout counted as error"
+has "$T/follower.prom" 'wg_ha_collector_errors{cluster="chrome",node="follower"} 0' "confirmed absent follower interface not an error"
 
 echo "failures: $FAILS"
 [ $FAILS = 0 ]
