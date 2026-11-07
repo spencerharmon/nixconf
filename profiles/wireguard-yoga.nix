@@ -55,14 +55,16 @@ in
   systemd.targets.wireguard-wg0.wantedBy = lib.mkForce [ ];
 
   networking.dhcpcd.runHook = ''
+    gw="''${new_routers:-$routers}"
+    ${pkgs.util-linux}/bin/logger -t wg-yoga-hook "reason=$reason interface=$interface gateway=$gw"
     case "$reason" in
       BOUND|REBIND|REOBTAIN)
         case "$interface" in
           lo|wg0) ;;
           *)
-            if [ "$new_routers" = "${homeGateway}" ]; then
+            if [ "$gw" = "${homeGateway}" ]; then
               ${pkgs.systemd}/bin/systemctl stop --no-block wireguard-wg0.target || true
-            elif [ -n "$new_routers" ]; then
+            elif [ -n "$gw" ]; then
               ${pkgs.systemd}/bin/systemctl start --no-block wireguard-wg0.target || true
             fi
             ;;
