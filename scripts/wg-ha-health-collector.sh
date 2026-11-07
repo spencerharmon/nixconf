@@ -1,172 +1,327 @@
 #!/usr/bin/env bash
-# wg-ha health collector — read-only observer of the native wg-ha stack
-# (profiles/wireguard-ha.nix). Emits a node_exporter textfile; see
-# docs/wireguard-ha-health-metrics.md for the metric contract.
-#
-#   collect [OUT]          observe this node, write Prometheus text to OUT (atomic) or stdout
-#   evaluate FILE...       fleet verdict over per-node outputs (one per node)
-#
-# Never reads/exports private keys: wg is queried only with the targeted
-# `wg show <if> latest-handshakes` (public keys + timestamps); the peer label is
-# a sha256 prefix of the PUBLIC key. Nothing here changes VPN/VRRP/UPnP state:
-# upnpc is only invoked with -l (list).
-#
-# Inputs (env, all optional; defaults are the production paths):
-#   WG_HA_RUN_DIR (/run/wg-ha)  WG_HA_STATE_DIR (/var/lib/wg-ha)  WG_HA_IF (wg0)
-#   WG_HA_ENV_FILE  secret env providing WG_HA_UPNP_URL / WG_HA_PORT (sourced, never printed)
-#   WG_HA_OWN_IP    override own LAN address (default: ip route get src)
-#   WG_HA_NODE      node label (default: hostname)
-#   WG_HA_CMD_TIMEOUT (5)  per-command timeout seconds
-#   WG_HA_HANDSHAKE_HEALTHY (180)  handshake age considered healthy
-#   WG_HA_NOW       override epoch (tests)
-#   WG_HA_MAX_AGE (180)  evaluate: max observation age before "stale"
-set -uo pipefail
+# Self-contained even when ExecStart references only this file in the Nix store.
+# Read-only observer: no wg dumps/configs/keys, UPnP list only, no env execution.
+set -euo pipefail
+exec python3 - "$@" <<'PY'
+import hashlib
+import ipaddress
+import json
+import math
+import os
+from pathlib import Path
+import re
+import shlex
+import subprocess
+import sys
+import tempfile
+import time
 
-CLUSTER=chrome
-now() { echo "${WG_HA_NOW:-$(date +%s)}"; }
-esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+STATES = ('MASTER', 'BACKUP', 'FAULT', 'STOP')
 
-collect() {
-  local run=${WG_HA_RUN_DIR:-/run/wg-ha} statedir=${WG_HA_STATE_DIR:-/var/lib/wg-ha}
-  local ifc=${WG_HA_IF:-wg0} to=${WG_HA_CMD_TIMEOUT:-5} healthy=${WG_HA_HANDSHAKE_HEALTHY:-180}
-  local node; node=$(esc "${WG_HA_NODE:-$(hostname)}")
-  local t; t=$(now)
-  local L="cluster=\"$CLUSTER\",node=\"$node\""
-  local errors=0
 
-  echo "# HELP wg_ha_observation_timestamp_seconds Epoch when this node's observation was taken."
-  echo "# TYPE wg_ha_observation_timestamp_seconds gauge"
-  echo "wg_ha_observation_timestamp_seconds{$L} $t"
+def uint(value):
+    if not re.fullmatch(r'[0-9]{1,20}', str(value)):
+        raise ValueError('invalid integer')
+    return int(value)
 
-  # --- role (keepalived notify writes vrrp-state) ---
-  local state="" role_ok=0
-  if [ -r "$run/vrrp-state" ]; then
-    state=$(head -c 64 "$run/vrrp-state" | tr -d '[:space:]')
-    case "$state" in MASTER|BACKUP|FAULT|STOP) role_ok=1 ;; esac
-  fi
-  echo "# HELP wg_ha_role_observed 1 if the VRRP role was read and valid; 0 = missing/malformed (role metrics absent)."
-  echo "# TYPE wg_ha_role_observed gauge"
-  echo "wg_ha_role_observed{$L} $role_ok"
-  if [ $role_ok = 1 ]; then
-    echo "# TYPE wg_ha_role gauge"
-    for s in MASTER BACKUP FAULT STOP; do
-      echo "wg_ha_role{$L,state=\"$s\"} $([ "$s" = "$state" ] && echo 1 || echo 0)"
-    done
-  else
-    errors=$((errors+1))
-  fi
-  echo "# TYPE wg_ha_armed gauge"
-  echo "wg_ha_armed{$L} $([ -e "$statedir/armed" ] && echo 1 || echo 0)"
 
-  # --- UPnP lease (list only) ---
-  local url="" port=51820 own="" lease_ok=0 owned=0 remaining="" holder=""
-  if [ -n "${WG_HA_ENV_FILE:-}" ] && [ -r "$WG_HA_ENV_FILE" ]; then
-    url=$( set +u; . "$WG_HA_ENV_FILE" >/dev/null 2>&1; printf '%s' "${WG_HA_UPNP_URL:-}")
-    port=$( set +u; . "$WG_HA_ENV_FILE" >/dev/null 2>&1; printf '%s' "${WG_HA_PORT:-51820}")
-  fi
-  own=${WG_HA_OWN_IP:-$(timeout "$to" ip -4 -o route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p')}
-  if [ -n "$url" ] && [[ "$port" =~ ^[0-9]+$ ]]; then
-    local out rc
-    out=$(timeout "$to" upnpc -u "$url" -l 2>/dev/null); rc=$?
-    if [ $rc = 0 ] && printf '%s\n' "$out" | grep -qiE 'external ?ip|^ *i protocol|->'; then
-      lease_ok=1
-      # e.g. " 0 UDP 51820->192.0.2.10:51820  'wg-ha' '' 97"
-      local line
-      line=$(printf '%s\n' "$out" | grep -E "^ *[0-9]+ +UDP +$port->[0-9.]+:[0-9]+ " | head -1)
-      if [ -n "$line" ]; then
-        holder=$(printf '%s' "$line" | sed -E "s/.*$port->([0-9.]+):.*/\1/")
-        remaining=$(printf '%s' "$line" | awk '{print $NF}')
-        [[ "$remaining" =~ ^[0-9]+$ ]] || { remaining=""; lease_ok=0; }
-        [ -n "$own" ] && [ "$holder" = "$own" ] && owned=1
-      fi
-    fi
-  fi
-  echo "# HELP wg_ha_upnp_lease_observed 1 if the router mapping list was read; 0 = missing/timeout/malformed."
-  echo "# TYPE wg_ha_upnp_lease_observed gauge"
-  echo "wg_ha_upnp_lease_observed{$L} $lease_ok"
-  if [ $lease_ok = 1 ]; then
-    echo "# HELP wg_ha_upnp_lease_present 1 if a UDP mapping for the WireGuard port exists (any holder)."
-    echo "# TYPE wg_ha_upnp_lease_present gauge"
-    echo "wg_ha_upnp_lease_present{$L} $([ -n "$holder" ] && echo 1 || echo 0)"
-    echo "# HELP wg_ha_upnp_lease_owned 1 if the mapping points at THIS node's real address."
-    echo "# TYPE wg_ha_upnp_lease_owned gauge"
-    echo "wg_ha_upnp_lease_owned{$L} $owned"
-    if [ -n "$holder" ]; then
-      echo "# TYPE wg_ha_upnp_lease_remaining_seconds gauge"
-      echo "wg_ha_upnp_lease_remaining_seconds{$L} $remaining"
-    fi
-  else
-    errors=$((errors+1))
-  fi
+def literal(value):
+    # Shell literal assignments, including concatenated quotes and escapes, but
+    # never expansion/eval. Ignore unrelated env lines without interpreting them.
+    result, quote, i = '', '', 0
+    while i < len(value):
+        ch = value[i]
+        if ch == quote:
+            quote = ''
+        elif quote == "'":
+            result += ch
+        elif ch == '\\':
+            i += 1
+            if i == len(value):
+                raise ValueError('continuation unsupported')
+            if quote == '"' and value[i] not in '$`"\\':
+                result += '\\'
+            result += value[i]
+        elif ch in '$`' or (not quote and ch in ';|&<>()'):
+            raise ValueError('nonliteral setting')
+        elif not quote and ch in "\"'":
+            quote = ch
+        elif not quote and ch.isspace():
+            rest = value[i:].strip()
+            if rest and not rest.startswith('#'):
+                raise ValueError('extra setting tokens')
+            break
+        else:
+            result += ch
+        i += 1
+    if quote:
+        raise ValueError('unclosed quote')
+    return result
 
-  # --- handshakes (targeted query; public keys only) ---
-  local hs_ok=0 hs
-  hs=$(timeout "$to" wg show "$ifc" latest-handshakes 2>/dev/null); local rc=$?
-  if [ $rc = 0 ]; then
-    hs_ok=1
-    local bad=0
-    while IFS=$'\t' read -r pk ts; do
-      [ -z "$pk" ] && continue
-      [[ "$pk" =~ ^[A-Za-z0-9+/]{43}=$ ]] && [[ "$ts" =~ ^[0-9]+$ ]] || { bad=1; continue; }
-      local id; id=$(printf '%s' "$pk" | sha256sum | cut -c1-12)
-      echo "wg_ha_peer_last_handshake_timestamp_seconds{$L,peer=\"$id\"} $ts"
-      if [ "$ts" = 0 ]; then
-        echo "wg_ha_peer_never_handshaken{$L,peer=\"$id\"} 1"
-        echo "wg_ha_peer_healthy{$L,peer=\"$id\"} 0"
-      else
-        local age=$(( t - ts ))
-        echo "wg_ha_peer_never_handshaken{$L,peer=\"$id\"} 0"
-        echo "wg_ha_peer_handshake_age_seconds{$L,peer=\"$id\"} $age"
-        echo "wg_ha_peer_healthy{$L,peer=\"$id\"} $([ $age -le "$healthy" ] && echo 1 || echo 0)"
-      fi
-    done <<<"$hs"
-    [ $bad = 1 ] && { hs_ok=0; errors=$((errors+1)); }
-  fi
-  echo "# HELP wg_ha_wg_observed 1 if wg handshakes were read (0 = interface down on non-leader, timeout or malformed)."
-  echo "# TYPE wg_ha_wg_observed gauge"
-  echo "wg_ha_wg_observed{$L} $hs_ok"
 
-  echo "# HELP wg_ha_collector_errors Number of failed/malformed observations in this run."
-  echo "# TYPE wg_ha_collector_errors gauge"
-  echo "wg_ha_collector_errors{$L} $errors"
-}
+def collect():
+    run = Path(os.environ.get('WG_HA_RUN_DIR', '/run/wg-ha'))
+    state_dir = Path(os.environ.get('WG_HA_STATE_DIR', '/var/lib/wg-ha'))
+    interface = os.environ.get('WG_HA_IF', 'wg0')
+    node = os.environ.get('WG_HA_NODE') or os.uname().nodename
+    now = uint(os.environ.get('WG_HA_NOW', str(int(time.time()))))
+    healthy = uint(os.environ.get('WG_HA_HANDSHAKE_HEALTHY', '180'))
+    timeout = float(os.environ.get('WG_HA_CMD_TIMEOUT', '5'))
+    if not math.isfinite(timeout) or timeout <= 0 or not re.fullmatch(r'[\w.-]{1,15}', interface):
+        raise ValueError('invalid collector configuration')
+    lines, types, errors = [], set(), 0
 
-# value <file> <metric-prefix-regex>: first sample value matching
-val() { grep -E "^$2[{ ]" "$1" | head -1 | awk '{print $NF}'; }
+    def emit(name, value, **labels):
+        if name not in types:
+            lines.append(f'# TYPE wg_ha_{name} gauge')
+            types.add(name)
+        labels = dict(cluster='chrome', node=node, **labels)
+        label_text = ','.join(k + '=' + json.dumps(v, ensure_ascii=False) for k, v in labels.items())
+        lines.append(f'wg_ha_{name}{{{label_text}}} {value}')
 
-evaluate() {
-  local maxage=${WG_HA_MAX_AGE:-180} t leaders=0 stale=0 missing=0
-  t=$(now)
-  for f in "$@"; do
-    if [ ! -s "$f" ]; then missing=$((missing+1)); echo "node_file=$f status=missing"; continue; fi
-    local ts role owned rem
-    ts=$(val "$f" wg_ha_observation_timestamp_seconds)
-    if ! [[ "$ts" =~ ^[0-9]+$ ]] || [ $((t - ts)) -gt "$maxage" ]; then
-      stale=$((stale+1)); echo "node_file=$f status=stale"; continue
-    fi
-    role=$(grep -E '^wg_ha_role\{.*state="MASTER"' "$f" | awk '{print $NF}')
-    owned=$(val "$f" wg_ha_upnp_lease_owned); rem=$(val "$f" wg_ha_upnp_lease_remaining_seconds)
-    if [ "$role" = 1 ] && [ "$owned" = 1 ] && [[ "$rem" =~ ^[0-9]+$ ]] && [ "$rem" -gt 0 ]; then
-      leaders=$((leaders+1)); echo "node_file=$f status=leader"
-    elif [ "$role" = 1 ]; then
-      leaders=$((leaders+1)); echo "node_file=$f status=leader_without_lease"; stale=$((stale+1))
-    else
-      echo "node_file=$f status=follower"
-    fi
-  done
-  if [ $missing -gt 0 ] || [ $stale -gt 0 ]; then echo "verdict=degraded_observation"; return 3
-  elif [ $leaders = 0 ]; then echo "verdict=no_leader"; return 4
-  elif [ $leaders -gt 1 ]; then echo "verdict=multiple_leaders"; return 5
-  fi
-  echo "verdict=ok"
-}
+    def query(*args):
+        return subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                              text=True, timeout=timeout, check=True).stdout
 
-case "${1:-}" in
-  collect)
-    shift
-    if [ -n "${1:-}" ]; then
-      tmp="$1.tmp.$$"; collect >"$tmp" && mv -f "$tmp" "$1"
-    else collect; fi ;;
-  evaluate) shift; evaluate "$@" ;;
-  *) echo "usage: $0 collect [OUT] | evaluate FILE..." >&2; exit 2 ;;
-esac
+    emit('observation_timestamp_seconds', now)
+    try:
+        role = (run / 'vrrp-state').read_text().strip()
+        if role not in STATES:
+            raise ValueError('invalid role')
+    except (OSError, ValueError):
+        emit('role_observed', 0)
+        errors += 1
+    else:
+        emit('role_observed', 1)
+        for state in STATES:
+            emit('role', int(role == state), state=state)
+    emit('armed', int((state_dir / 'armed').exists()))
+
+    try:
+        settings = {key: os.environ.get(key, '') for key in ('WG_HA_UPNP_URL', 'WG_HA_PORT')}
+        env_file = os.environ.get('WG_HA_ENV_FILE')
+        files = [Path(env_file)] if env_file else []
+        override = state_dir / 'override.env'
+        if override.exists():
+            files.append(override)
+        for path in files:
+            with path.open() as stream:
+                for line in stream:
+                    match = re.match(r'^\s*(?:export\s+)?(WG_HA_UPNP_URL|WG_HA_PORT)=(.*)$', line.rstrip('\n'))
+                    if match:
+                        settings[match[1]] = literal(match[2])
+                    elif re.match(r'^\s*(?:export\s+)?(?:WG_HA_UPNP_URL|WG_HA_PORT)\b', line):
+                        raise ValueError('malformed relevant setting')
+        url = settings['WG_HA_UPNP_URL']
+        port = uint(settings['WG_HA_PORT'] or '51820')
+        if not re.fullmatch(r'https?://[^\s]+', url) or not 1 <= port <= 65535:
+            raise ValueError('invalid mapping configuration')
+        own = os.environ.get('WG_HA_OWN_IP')
+        if not own:
+            route = query('ip', '-4', '-o', 'route', 'get', '1.1.1.1')
+            addresses = re.findall(r'\bsrc\s+(\S+)', route)
+            if len(addresses) != 1:
+                raise ValueError('missing own address')
+            own = addresses[0]
+        own = str(ipaddress.IPv4Address(own))
+        listing = query('upnpc', '-u', url, '-l')
+        if not re.search(r'^\s*i\s+protocol\s+exPort->inAddr:inPort\b', listing, re.M | re.I):
+            raise ValueError('missing mapping table')
+        mappings = []
+        for line in listing.splitlines():
+            # Inspect every UDP table row, including malformed target rows. Do
+            # not treat a failed regex match as evidence that no mapping exists.
+            if not re.match(r'^\s*(?:\S+\s+)?UDP\b', line):
+                continue
+            fields = shlex.split(line)
+            if len(fields) != 6 or not fields[0].isdigit() or fields[1] != 'UDP':
+                raise ValueError('malformed mapping row')
+            match = re.fullmatch(r'(\d+)->([^:]+):(\d+)', fields[2])
+            if not match:
+                raise ValueError('malformed mapping address')
+            external, holder, internal = uint(match[1]), str(ipaddress.IPv4Address(match[2])), uint(match[3])
+            remaining = uint(fields[5])
+            if not 1 <= external <= 65535 or not 1 <= internal <= 65535:
+                raise ValueError('invalid mapping port')
+            if external == port:
+                if internal != port:
+                    raise ValueError('wrong internal port')
+                mappings.append((holder, remaining))
+        if len(mappings) > 1:
+            raise ValueError('duplicate mapping')
+    except (OSError, ValueError, subprocess.SubprocessError):
+        emit('upnp_lease_observed', 0)
+        errors += 1
+    else:
+        emit('upnp_lease_observed', 1)
+        emit('upnp_lease_present', int(bool(mappings)))
+        emit('upnp_lease_owned', int(bool(mappings) and mappings[0][0] == own))
+        if mappings:
+            emit('upnp_lease_remaining_seconds', mappings[0][1])
+
+    present = None
+    try:
+        interfaces = query('wg', 'show', 'interfaces').split()
+        if len(set(interfaces)) != len(interfaces) or any(not re.fullmatch(r'[\w.-]{1,15}', i) for i in interfaces):
+            raise ValueError('invalid interface list')
+        present = interface in interfaces
+    except (OSError, ValueError, subprocess.SubprocessError):
+        emit('interface_observed', 0)
+        errors += 1
+    else:
+        emit('interface_observed', 1)
+        emit('interface_present', int(present))
+
+    hs_ok = 0
+    if present is not False:
+        try:
+            handshakes = query('wg', 'show', interface, 'latest-handshakes')
+            peers = {}
+            for line in handshakes.splitlines():
+                match = re.fullmatch(r'([A-Za-z0-9+/]{43}=)\s+([0-9]+)', line)
+                if not match or match[1] in peers:
+                    raise ValueError('invalid or duplicate handshake')
+                timestamp = uint(match[2])
+                if timestamp > now:
+                    raise ValueError('future handshake')
+                peers[match[1]] = timestamp
+        except (OSError, ValueError, subprocess.SubprocessError):
+            errors += 1
+        else:
+            # Validate the complete result before publishing any peer series.
+            hs_ok = 1
+            for public_key, timestamp in peers.items():
+                peer = hashlib.sha256(public_key.encode()).hexdigest()[:12]
+                emit('peer_last_handshake_timestamp_seconds', timestamp, peer=peer)
+                emit('peer_never_handshaken', int(timestamp == 0), peer=peer)
+                emit('peer_healthy', int(timestamp != 0 and now - timestamp <= healthy), peer=peer)
+                if timestamp:
+                    emit('peer_handshake_age_seconds', now - timestamp, peer=peer)
+    emit('wg_observed', hs_ok)
+    emit('collector_errors', errors)
+    return '\n'.join(lines) + '\n'
+
+
+def evaluate(files):
+    invalid, leaders, seen = False, [], set()
+    try:
+        expected = os.environ.get('WG_HA_EXPECTED_NODES', '').split()
+        if not expected or len(set(expected)) != len(expected):
+            raise ValueError('expected inventory required and unique')
+        now = uint(os.environ.get('WG_HA_NOW', str(int(time.time()))))
+        max_age = uint(os.environ.get('WG_HA_MAX_AGE', '120'))
+    except ValueError:
+        print('verdict=degraded_observation')
+        return 3
+    for file in files:
+        try:
+            samples, identities = {}, set()
+            for line in Path(file).read_text().splitlines():
+                if not line.strip() or line.lstrip().startswith('#'):
+                    continue
+                match = re.fullmatch(r'(wg_ha_\w+)\{(.*)\}\s+([0-9]+)', line)
+                if not match:
+                    raise ValueError('invalid sample')
+                labels, pos = {}, 0
+                while pos < len(match[2]):
+                    label = re.match(r'(\w+)=("(?:[^"\\]|\\[\\"n])*")(,|$)', match[2][pos:])
+                    if not label or label[1] in labels:
+                        raise ValueError('invalid labels')
+                    labels[label[1]] = json.loads(label[2])
+                    pos += label.end()
+                    if label[3] and pos == len(match[2]):
+                        raise ValueError('trailing label separator')
+                if labels.get('cluster') != 'chrome' or labels.get('node') not in expected:
+                    raise ValueError('unexpected identity')
+                required_labels = {'cluster', 'node'}
+                if match[1] == 'wg_ha_role':
+                    required_labels.add('state')
+                elif match[1].startswith('wg_ha_peer_'):
+                    required_labels.add('peer')
+                if set(labels) != required_labels:
+                    raise ValueError('unexpected labels')
+                identities.add(labels['node'])
+                key = (match[1], tuple(sorted(labels.items())))
+                if key in samples:
+                    raise ValueError('duplicate sample')
+                samples[key] = uint(match[3])
+            if len(identities) != 1:
+                raise ValueError('missing or mixed identity')
+            node = identities.pop()
+            if node in seen:
+                raise ValueError('duplicate node')
+            seen.add(node)
+
+            def value(name, **extra):
+                labels = dict(cluster='chrome', node=node, **extra)
+                return samples[('wg_ha_' + name, tuple(sorted(labels.items())))]
+
+            timestamp = value('observation_timestamp_seconds')
+            age = now - timestamp
+            if age < 0 or age > max_age:
+                raise ValueError('stale or future observation')
+            if value('role_observed') != 1:
+                raise ValueError('unobserved role')
+            roles = [value('role', state=state) for state in STATES]
+            if any(r not in (0, 1) for r in roles) or sum(roles) != 1:
+                raise ValueError('invalid role')
+            if sum(name == 'wg_ha_role' for name, _ in samples) != len(STATES):
+                raise ValueError('extra role')
+            if value('upnp_lease_observed') != 1:
+                raise ValueError('unobserved lease')
+            present, owned = value('upnp_lease_present'), value('upnp_lease_owned')
+            if present not in (0, 1) or owned not in (0, 1) or owned > present:
+                raise ValueError('invalid lease')
+            remaining = value('upnp_lease_remaining_seconds') if present else 0
+            if not present and any(name == 'wg_ha_upnp_lease_remaining_seconds' for name, _ in samples):
+                raise ValueError('remaining validity without mapping')
+            if roles[0]:
+                valid_lease = owned == 1 and remaining > age
+                leaders.append(valid_lease)
+                print('node=' + node + ' status=' + ('leader' if valid_lease else 'leader_without_lease'))
+            else:
+                print('node=' + node + ' status=follower')
+        except (OSError, ValueError, KeyError):
+            invalid = True
+            print('status=invalid_observation')
+    if invalid or seen != set(expected):
+        verdict, rc = 'degraded_observation', 3
+    elif len(leaders) > 1:
+        verdict, rc = 'multiple_leaders', 5
+    elif not leaders:
+        verdict, rc = 'no_leader', 4
+    elif not leaders[0]:
+        verdict, rc = 'degraded_observation', 3
+    else:
+        verdict, rc = 'ok', 0
+    print('verdict=' + verdict)
+    return rc
+
+
+try:
+    if len(sys.argv) >= 2 and sys.argv[1] == 'evaluate':
+        sys.exit(evaluate(sys.argv[2:]))
+    if len(sys.argv) not in (2, 3) or sys.argv[1] != 'collect':
+        print('usage: wg-ha-health-collector.sh collect [OUT] | evaluate FILE...', file=sys.stderr)
+        sys.exit(2)
+    output = collect()
+    if len(sys.argv) == 2:
+        sys.stdout.write(output)
+    else:
+        destination = Path(sys.argv[2])
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', dir=destination.parent, prefix=destination.name + '.',
+                                             suffix='.tmp', delete=False) as stream:
+                temporary = stream.name
+                stream.write(output)
+                os.fchmod(stream.fileno(), 0o644)
+            os.replace(temporary, destination)
+        finally:
+            if temporary and os.path.exists(temporary):
+                os.unlink(temporary)
+except (OSError, ValueError):
+    # Do not log paths, env values, router responses or command stderr.
+    print('wg-ha-health: collection failed', file=sys.stderr)
+    sys.exit(2)
+PY

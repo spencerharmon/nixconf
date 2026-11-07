@@ -165,7 +165,11 @@ in
     networking.firewall.extraCommands = ''
       iptables -A nixos-fw -p vrrp -j nixos-fw-accept
     '';
-    environment.systemPackages = [ cli pkgs.wireguard-tools ];
+    environment.systemPackages = [ cli pkgs.wireguard-tools (pkgs.writeShellScriptBin "wg-ha-health-observe" ''
+      export PATH=${lib.makeBinPath [ pkgs.python3 pkgs.wireguard-tools pkgs.iproute2 pkgs.miniupnpc ]}
+      export WG_HA_ENV_FILE=${envFile}
+      exec python3 ${../scripts/wg-ha-health-live.py} --snapshot
+    '') ];
     systemd.tmpfiles.rules = [ "d ${stateDir} 0700 root root -" "d ${runDir} 0755 root root -" ];
 
     services.keepalived = {
@@ -191,7 +195,7 @@ in
     # only its textfile dir.
     systemd.services.wg-ha-health = {
       description = "WireGuard HA: health textfile collector (read-only)";
-      path = with pkgs; [ wireguard-tools iproute2 miniupnpc gnugrep gnused gawk coreutils inetutils ];
+      path = with pkgs; [ wireguard-tools iproute2 miniupnpc python3 ];
       environment = { WG_HA_ENV_FILE = envFile; WG_HA_NODE = config.networking.hostName; };
       serviceConfig = {
         Type = "oneshot";
@@ -202,6 +206,7 @@ in
         ProtectSystem = "strict";
         ReadWritePaths = [ metricsDir ];
         ProtectHome = true;
+        InaccessiblePaths = [ "-${conf}" ];
         PrivateTmp = true;
         NoNewPrivileges = true;
         CapabilityBoundingSet = [ "CAP_NET_ADMIN" ];
