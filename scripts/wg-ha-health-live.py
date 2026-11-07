@@ -7,6 +7,7 @@ Only that router env (URL/port/subnet), not the WireGuard config, is sourced.
 `live` requires positionally paired WG_HA_LIVE_HOSTS and WG_HA_EXPECTED_NODES.
 """
 
+import decimal
 import hashlib
 import ipaddress
 import json
@@ -131,9 +132,14 @@ def metrics(body, node):
     for line in body.splitlines():
         if not line.startswith("wg_ha_"):
             continue
-        match = re.fullmatch(r'(wg_ha_[a-z_]+)\{([^{}]+)\} ([0-9]+)', line)
+        # node_exporter re-renders textfile values with Go's %g formatting, so a
+        # Unix timestamp is served as e.g. 1.794042566e+09. Accept plain or
+        # exponent notation but require an exact non-negative integer.
+        match = re.fullmatch(r'(wg_ha_[a-z_]+)\{([^{}]+)\} ([0-9]+(?:\.[0-9]+)?(?:e\+?[0-9]+)?)', line)
         require(match, "malformed wg_ha sample")
         name, labels, value = match.groups()
+        value = decimal.Decimal(value)
+        require(value == value.to_integral_value() and value < 2 ** 53, "non-integer wg_ha sample")
         pairs = re.findall(r'([a-z_]+)="([A-Za-z0-9_.-]+)"', labels)
         require(",".join(f'{k}="{v}"' for k, v in pairs) == labels
                 and len(dict(pairs)) == len(pairs), "invalid metric labels")
