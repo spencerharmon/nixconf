@@ -17,7 +17,11 @@
     # ACP adapter that lets emacs agent-shell drive the pi coding agent.
     # Packaged in profiles/ai-tools.nix (not in nixpkgs).
     pi-acp = {
-      url = "github:svkozak/pi-acp/v0.0.34";
+      # Pinned to the pi-acp release that matches pi 0.73.0 in the pinned nixpkgs:
+      # v0.0.34 sends `get_available_thinking_levels`, which older pi answers with
+      # an id-less "Unknown command" error, so pi-acp never resolves the request
+      # and session/new hangs forever. Bump together with pi.
+      url = "github:svkozak/pi-acp/v0.0.33";
       flake = false;
     };
     anthropic-skills = {

@@ -7,9 +7,9 @@ let
   # package-lock.json` inside the new checkout after bumping the input.
   pi-acp = pkgs.buildNpmPackage {
     pname = "pi-acp";
-    version = "0.0.34";
+    version = "0.0.33";
     src = inputs.pi-acp;
-    npmDepsHash = "sha256-BvLNtFfp1cMVjzWcMRSdhTqiJrTfbFoUbWkkPW9200o=";
+    npmDepsHash = "sha256-/fX79XucKojL/6gZbK5eizEfrXso8rlTgiHfJffmDuY=";
     # tsup bundles dist/index.js (the package's `bin`).
   };
 in
