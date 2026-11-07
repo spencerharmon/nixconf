@@ -28,8 +28,12 @@
       url = "github:badlogic/pi-skills";
       flake = false;
     };
+    nixos-management-skill = {
+      url = "github:michalzubkowicz/nixos-management-skill";
+      flake = false;
+    };
   };
-  outputs = inputs@{ self, nixpkgs, nixpkgs-chrome, deploy-rs, agenix, home-manager, pi-acp, anthropic-skills, pi-skills }: {
+  outputs = inputs@{ self, nixpkgs, nixpkgs-chrome, deploy-rs, agenix, home-manager, pi-acp, anthropic-skills, pi-skills, nixos-management-skill }: {
     nixosConfigurations = {
       # chrome1..3: HA k3s fleet, every node a server (embedded etcd).
       # chrome1 bootstraps the cluster; chrome2/3 join it. Every node runs
@@ -125,6 +129,7 @@
           ./profiles/ai-tools.nix
           ./users.nix
           ./profiles/yoga-sd.nix
+          ./profiles/yoga-sd-io-throttle.nix
           ./profiles/libxml2-grub-fix.nix
           ./profiles/wireguard-yoga.nix
           ./systems/yoga-sd-0/configuration.nix

@@ -20,11 +20,15 @@
 #
 #   blkid -s PARTUUID -o value /dev/sdb1   # -> bootPartUuid
 #   blkid -s PARTUUID -o value /dev/sdb2   # -> luksPartUuid
-{ ... }:
+{ pkgs, ... }:
 {
+  environment.systemPackages = with pkgs; [
+    signal-desktop
+  ];
+
   yogaSd = {
-    bootPartUuid = "6d223f66-01";
-    luksPartUuid = "6d223f66-02";
+    bootPartUuid = "4d2f203b-01";
+    luksPartUuid = "4d2f203b-02";
 
     rootLabel = "yoga-sd-0-root";
   };

@@ -97,6 +97,13 @@ in {
     # identity paths from openssh's host-key paths, so enabling sshd
     # satisfies age.identityPaths automatically.
     services.openssh.enable = true;
+    # Key-only auth for the recovery shell; matches profiles/common.nix
+    # (which underyoga does not import).
+    services.openssh.settings = {
+      PasswordAuthentication = false;
+      KbdInteractiveAuthentication = false;
+      PermitRootLogin = "prohibit-password";
+    };
 
     # /boot on the eMMC, ext4, unencrypted.
     fileSystems."/boot" = lib.mkForce {

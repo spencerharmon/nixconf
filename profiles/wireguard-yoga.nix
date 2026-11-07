@@ -14,19 +14,27 @@
 #   - server public key: 6dqts5KM9KJv0mNJHqpu/QS6z46ct2mFGFGj1sAyRC0=
 #   - yoga's assigned pool tunnel address: 10.8.0.3
 #
-# AllowedIPs: the WG pool (10.8.0.0/24) ONLY.
+# AllowedIPs: the WG pool (10.8.0.0/24) plus the server LAN 192.168.1.0/24,
+# so spray services behind the wg server (e.g. 192.168.1.1) are reachable
+# through the tunnel. Crypto-routing (allowedIPs) always includes the LAN;
+# kernel routing is handled collision-safely below.
 #
-# TODO(operator-approved): the flux wireguard-routed-lan split-tunnel spec
-# also wanted the server LAN 192.168.1.0/24 routed over wg0. It is
-# DELIBERATELY EXCLUDED here (operator-approved 2026-07-13). yoga-sd-0 lives
-# physically ON 192.168.1.0/24, and networking.wireguard.interfaces auto-adds
-# `ip route replace 192.168.1.0/24 dev wg0`, which hijacks yoga's own LAN
-# route and blackholes all local connectivity (this bricked a live deploy on
-# 2026-07-13, dropping SSH mid-activation and stranding the host in emergency
-# mode). While yoga is on the home LAN it reaches 192.168.1.0/24 directly and
-# needs no tunnel route for it. Re-adding the LAN subnet requires
-# collision-safe handling (policy routing / a wg-quick PostUp that only adds
-# the route when yoga is NOT already on 192.168.1.0/24) before it is safe.
+# COLLISION-SAFE LAN ROUTE (supersedes the 2026-07-13 operator decision to
+# exclude the LAN entirely): the earlier brick was caused by
+# networking.wireguard auto-adding `ip route replace 192.168.1.0/24 dev wg0`,
+# which hijacked yoga's own LAN route when yoga was physically ON
+# 192.168.1.0/24 -- blackholing local connectivity and dropping SSH
+# mid-activation. Fix: allowedIPsAsRoutes = false disables that auto route,
+# and postSetup adds the LAN route via wg0 ONLY when yoga is NOT already on a
+# 192.168.1.x address. On the home LAN (192.168.1.x) yoga reaches the LAN
+# directly and no tunnel route is installed -> no collision. On any other
+# network (e.g. 192.168.217.x) the LAN route is installed and spray is
+# reachable over the tunnel.
+#
+# dynamicEndpointRefreshSeconds re-resolves the endpoint hostname
+# periodically, so a boot where DNS was not yet ready (the observed
+# "Name or service not known: wireguard.polyfam.studio:51820" peer-unit
+# failure) self-heals instead of leaving the tunnel peerless until a rebuild.
 #
 # LAN guard (2026-11-06): the tunnel ONLY works away from home. The endpoint
 # resolves to the router's public IP, and the home router does not hairpin
@@ -72,12 +80,34 @@ in
   networking.wireguard.interfaces.wg0 = {
     ips = [ "10.8.0.3/32" ];
     privateKeyFile = config.age.secrets.wireguard-yoga.path;
+
+    # Disable the built-in `ip route replace <allowedIP> dev wg0` so the
+    # server LAN route never blindly hijacks yoga's own LAN route. Routes
+    # are installed collision-safely in postSetup below.
+    allowedIPsAsRoutes = false;
+
+    postSetup = ''
+      # WG pool always routes over the tunnel.
+      ${pkgs.iproute2}/bin/ip route replace 10.8.0.0/24 dev wg0
+      # Server LAN routes over the tunnel ONLY when yoga is not physically
+      # on 192.168.1.x (otherwise it would blackhole the local LAN).
+      if ! ${pkgs.iproute2}/bin/ip -4 -o addr show | ${pkgs.gnugrep}/bin/grep -q 'inet 192\.168\.1\.'; then
+        ${pkgs.iproute2}/bin/ip route replace 192.168.1.0/24 dev wg0
+      fi
+    '';
+
+    postShutdown = ''
+      ${pkgs.iproute2}/bin/ip route del 192.168.1.0/24 dev wg0 2>/dev/null || true
+      ${pkgs.iproute2}/bin/ip route del 10.8.0.0/24 dev wg0 2>/dev/null || true
+    '';
+
     peers = [
       {
         publicKey = "6dqts5KM9KJv0mNJHqpu/QS6z46ct2mFGFGj1sAyRC0=";
         endpoint = "wireguard.polyfam.studio:51820";
-        allowedIPs = [ "10.8.0.0/24" ];
+        allowedIPs = [ "10.8.0.0/24" "192.168.1.0/24" ];
         persistentKeepalive = 25;
+        dynamicEndpointRefreshSeconds = 60;
       }
     ];
   };

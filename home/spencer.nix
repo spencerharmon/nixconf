@@ -17,6 +17,7 @@
   # Skills for the pi coding agent (pi reads ~/.pi/agent/skills/*).
   home.file.".pi/agent/skills/anthropic-skills".source = inputs.anthropic-skills;
   home.file.".pi/agent/skills/pi-skills".source = inputs.pi-skills;
+  home.file.".pi/agent/skills/nixos-management".source = inputs.nixos-management-skill;
 
   home.packages = with pkgs; [ nodejs_24 pulseaudio ];
 
